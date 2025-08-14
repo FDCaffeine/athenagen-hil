@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+outputs/_backups/
+outputs/*.json
+outputs/log.txt
+.venv/
