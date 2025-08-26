@@ -17,4 +17,4 @@ outputs/
 exports/
 
 # Streamlit
-.streamlit/secrets.toml
+.streamlit/secrets.tomlgcp-sa.json
