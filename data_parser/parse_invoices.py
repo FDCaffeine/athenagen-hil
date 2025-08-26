@@ -1,9 +1,14 @@
 # data_parser/parse_invoices.py
+from __future__ import annotations
+
 import os
 import re
+from contextlib import suppress
 from datetime import datetime
-from typing import List, Dict, Any, Tuple, Optional
+from typing import Any
+
 from bs4 import BeautifulSoup
+
 
 # ---------- choose best parser ----------
 def _pick_parser() -> str:
@@ -15,32 +20,41 @@ def _pick_parser() -> str:
             continue
     return "html.parser"
 
+
 _PARSER = _pick_parser()
 
 # ---------- helpers ----------
 WS = re.compile(r"\s+")
+
+
 def _nw(s: str | None) -> str:
     return WS.sub(" ", (s or "")).strip()
 
-def _norm_amount(tok: str | None) -> str:
-    if not tok:
+
+def _norm_amount(tok: str) -> str:
+    if tok is None:
         return ""
     t = re.sub(r"[^\d,.\-]", "", tok.strip())
-    if "," in t and t.rfind(",") > t.rfind("."):
-        t = t.replace(".", "").replace(",", ".")
-    else:
-        t = t.replace(",", "")
+    t = (
+        t.replace(".", "").replace(",", ".")
+        if ("," in t and t.rfind(",") > t.rfind("."))
+        else t.replace(",", "")
+    )
     return t
 
-def _to_float(tok: str | None) -> Optional[float]:
+
+def _to_float(tok: str | None) -> float | None:
     try:
         return float(_norm_amount(tok))
     except Exception:
         return None
 
+
 DATE_PAT = re.compile(
     r"\b((?:\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})|(?:\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}))\b"
 )
+
+
 def _parse_date_text(text: str) -> str:
     m = DATE_PAT.search(text or "")
     if not m:
@@ -53,16 +67,23 @@ def _parse_date_text(text: str) -> str:
             pass
     return raw
 
+
 INV_PATS = [
-    re.compile(r"(?:τιμολ(?:όγιο|\.?)|invoice)\s*(?:αρ\.|no\.|#|:)?\s*([A-Z]{0,4}[-/]?\d[\w\-\/]+)", re.I),
+    re.compile(
+        r"(?:τιμολ(?:όγιο|\.?)|invoice)\s*(?:αρ\.|no\.|#|:)?\s*([A-Z]{0,4}[-/]?\d[\w\-\/]+)",
+        re.I,
+    ),
     re.compile(r"(?:αριθμός|αρ\.)\s*:?[\s]*([A-Z]{0,4}[-/]?\d[\w\-\/]+)", re.I),
 ]
+
+
 def _find_invoice_number_from_text(text: str) -> str:
     for p in INV_PATS:
         m = p.search(text)
         if m:
             return _nw(m.group(1))
     return ""
+
 
 def _find_summary_table(soup: BeautifulSoup):
     div_sum = soup.select_one("div.summary")
@@ -75,7 +96,10 @@ def _find_summary_table(soup: BeautifulSoup):
             return tbl
     return None
 
-def _extract_summary_amounts(soup: BeautifulSoup) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float], str]:
+
+def _extract_summary_amounts(
+    soup: BeautifulSoup,
+) -> tuple[float | None, float | None, float | None, float | None, str]:
     subtotal = vat_amount = vat_rate = total = None
     currency = "EUR"
     tbl = _find_summary_table(soup)
@@ -83,13 +107,17 @@ def _extract_summary_amounts(soup: BeautifulSoup) -> Tuple[Optional[float], Opti
         return subtotal, vat_amount, vat_rate, total, currency
 
     whole_text = _nw(tbl.get_text(" "))
-    if "€" in whole_text: currency = "EUR"
-    elif "$" in whole_text: currency = "USD"
-    elif "£" in whole_text: currency = "GBP"
+    if "€" in whole_text:
+        currency = "EUR"
+    elif "$" in whole_text:
+        currency = "USD"
+    elif "£" in whole_text:
+        currency = "GBP"
 
     for tr in tbl.find_all("tr"):
         tds = tr.find_all(["td", "th"])
-        if len(tds) < 2: continue
+        if len(tds) < 2:
+            continue
         label = _nw(tds[0].get_text(" "))
         value = _nw(tds[-1].get_text(" "))
 
@@ -98,8 +126,10 @@ def _extract_summary_amounts(soup: BeautifulSoup) -> Tuple[Optional[float], Opti
         elif re.search(r"φπα|vat", label, re.I):
             m = re.search(r"(?:φπα|vat)\s*(\d{1,2}(?:[.,]\d{1,2})?)\s*%", label, re.I)
             if m:
-                try: vat_rate = float(_norm_amount(m.group(1)))
-                except: vat_rate = None
+                try:
+                    vat_rate = float(_norm_amount(m.group(1)))
+                except Exception:
+                    vat_rate = None
             vat_amount = _to_float(value)
         elif re.search(r"^σύνολο\b|grand\s*total|total\s*amount|πληρωτέο", label, re.I):
             total = _to_float(value)
@@ -108,41 +138,62 @@ def _extract_summary_amounts(soup: BeautifulSoup) -> Tuple[Optional[float], Opti
         total = round(subtotal + vat_amount, 2)
     if total is not None and subtotal is not None and vat_amount is None:
         diff = round(total - subtotal, 2)
-        if diff >= 0: vat_amount = diff
+        if diff >= 0:
+            vat_amount = diff
     if vat_amount is not None and subtotal is not None and vat_rate is None and subtotal > 0:
         vat_rate = round((vat_amount / subtotal) * 100, 2)
 
     return subtotal, vat_amount, vat_rate, total, currency
 
+
 # ----------- extraction helpers για Seller/Buyer/Items ----------
-VAT_RE   = re.compile(r"ΑΦΜ\s*:\s*([A-Za-z0-9]+)", re.I)
-DOY_RE   = re.compile(r"ΔΟΥ\s*:\s*([^\|\n]+)", re.I)
+VAT_RE = re.compile(r"ΑΦΜ\s*:\s*([A-Za-z0-9]+)", re.I)
+DOY_RE = re.compile(r"ΔΟΥ\s*:\s*([^\|\n]+)", re.I)
 PHONE_RE = re.compile(r"(?:Τηλ|Τηλέφωνο)\s*:\s*([0-9\-\+\s]+)", re.I)
 EMAIL_RE = re.compile(r"Email\s*:\s*([^\s|]+)", re.I)
 
-def _extract_seller_block(soup: BeautifulSoup) -> Dict[str, Any]:
-    out = {"seller_name":"","seller_email":"","seller_phone":"","seller_vat":"","seller_tax_office":"","seller_address":""}
+
+def _extract_seller_block(soup: BeautifulSoup) -> dict[str, Any]:
+    out = {
+        "seller_name": "",
+        "seller_email": "",
+        "seller_phone": "",
+        "seller_vat": "",
+        "seller_tax_office": "",
+        "seller_address": "",
+    }
     header = soup.select_one(".header")
-    if not header: return out
+    if not header:
+        return out
     company = header.select_one(".company")
-    if company: out["seller_name"] = _nw(company.get_text())
+    if company:
+        out["seller_name"] = _nw(company.get_text())
     divs = header.find_all("div")
     txts = [_nw(d.get_text(" ")) for d in divs]
     # address line: first non meta after name
     for t in txts:
-        if t == out["seller_name"]: continue
+        if t == out["seller_name"]:
+            continue
         low = t.lower()
-        if ("αφμ" in low) or ("δου" in low) or ("email" in low) or ("τηλ" in low): continue
-        out["seller_address"] = t; break
+        if ("αφμ" in low) or ("δου" in low) or ("email" in low) or ("τηλ" in low):
+            continue
+        out["seller_address"] = t
+        break
     joined = " | ".join(txts)
-    m_vat = VAT_RE.search(joined);  out["seller_vat"] = _nw(m_vat.group(1)) if m_vat else ""
-    m_doy = DOY_RE.search(joined);  out["seller_tax_office"] = _nw(m_doy.group(1)) if m_doy else ""
-    m_tel = PHONE_RE.search(joined);out["seller_phone"] = _nw(m_tel.group(1)) if m_tel else ""
-    m_em  = EMAIL_RE.search(joined);out["seller_email"] = _nw(m_em.group(1)) if m_em else ""
+    m_vat = VAT_RE.search(joined)
+    out["seller_vat"] = _nw(m_vat.group(1)) if m_vat else ""
+    m_doy = DOY_RE.search(joined)
+    out["seller_tax_office"] = _nw(m_doy.group(1)) if m_doy else ""
+    m_tel = PHONE_RE.search(joined)
+    out["seller_phone"] = _nw(m_tel.group(1)) if m_tel else ""
+    m_em = EMAIL_RE.search(joined)
+    out["seller_email"] = _nw(m_em.group(1)) if m_em else ""
     return out
 
+
 def _get_details_wrapper(details: BeautifulSoup):
-    if not details: return None
+    if not details:
+        return None
     for child in details.find_all("div", recursive=False):
         style = (child.get("style") or "").lower()
         if "display" in style and "flex" in style:
@@ -153,87 +204,107 @@ def _get_details_wrapper(details: BeautifulSoup):
             return child
     return None
 
+
 def _extract_header_left_block(details: BeautifulSoup) -> str:
-    if not details: return ""
+    if not details:
+        return ""
     wrapper = _get_details_wrapper(details)
-    if not wrapper: return ""
+    if not wrapper:
+        return ""
     cols = wrapper.find_all("div", recursive=False)
     left = cols[0] if cols else None
     return _nw(left.get_text(" ")) if left else ""
 
-def _extract_buyer_block(soup: BeautifulSoup) -> Dict[str, Any]:
-    out = {"buyer_name":"", "buyer_vat":"", "buyer_address":""}
+
+def _extract_buyer_block(soup: BeautifulSoup) -> dict[str, Any]:
+    out: dict[str, Any] = {"buyer_name": "", "buyer_vat": "", "buyer_address": ""}
     details = soup.select_one(".invoice-details")
-    if not details: return out
+    if not details:
+        return out
     wrapper = _get_details_wrapper(details)
-    if not wrapper: return out
+    if not wrapper:
+        return out
     cols = wrapper.find_all("div", recursive=False)
     right = cols[1] if len(cols) >= 2 else None
-    if not right: return out
+    if not right:
+        return out
     raw = right.get_text("\n")
-    lines = [l.strip() for l in raw.splitlines() if l.strip()]
-    if lines and lines[0].lower().startswith("πελάτης"): lines = lines[1:]
-    if lines: out["buyer_name"] = lines[0]
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if lines and lines[0].lower().startswith("πελάτης"):
+        lines = lines[1:]
+    if lines:
+        out["buyer_name"] = lines[0]
     vat = ""
-    for l in reversed(lines):
-        m = VAT_RE.search(l)
-        if m: vat = m.group(1); break
+    for line in reversed(lines):
+        m = VAT_RE.search(line)
+        if m:
+            vat = m.group(1)
+            break
     out["buyer_vat"] = vat
     addr_parts = []
-    for l in lines[1:]:
-        if VAT_RE.search(l): break
-        addr_parts.append(l)
+    for line in lines[1:]:
+        if VAT_RE.search(line):
+            break
+        addr_parts.append(line)
     out["buyer_address"] = ", ".join(addr_parts)
     return out
 
-def _extract_payment_and_date(details_text: str) -> Tuple[str, str]:
+
+def _extract_payment_and_date(details_text: str) -> tuple[str, str]:
     date_str = _parse_date_text(details_text)
     pay = ""
     m = re.search(r"Τρόπος\s*Πληρωμής\s*:\s*([^\n]+)", details_text, re.I)
-    if m: pay = _nw(m.group(1))
+    if m:
+        pay = _nw(m.group(1))
     return date_str, pay
 
-def _extract_items(soup: BeautifulSoup) -> Tuple[List[Dict[str, Any]], str]:
-    items: List[Dict[str, Any]] = []
+
+def _extract_items(soup: BeautifulSoup) -> tuple[list[dict[str, Any]], str]:
+    items: list[dict[str, Any]] = []
     currency = "EUR"
     tbl = soup.select_one("table.invoice-table")
-    if not tbl: return items, currency
+    if not tbl:
+        return items, currency
     tbody = tbl.find("tbody") or tbl
     for tr in tbody.find_all("tr"):
         tds = tr.find_all("td")
-        if len(tds) < 4: continue
+        if len(tds) < 4:
+            continue
         desc = _nw(tds[0].get_text(" "))
-        qty  = _to_float(_nw(tds[1].get_text(" ")))
+        qty = _to_float(_nw(tds[1].get_text(" ")))
         unit = _nw(tds[2].get_text(" "))
         total = _nw(tds[3].get_text(" "))
         sym_text = " ".join([unit, total])
-        if "€" in sym_text: currency = "EUR"
-        elif "$" in sym_text: currency = "USD"
-        elif "£" in sym_text: currency = "GBP"
-        items.append({
-            "description": desc,
-            "quantity": qty,
-            "unit_price": _to_float(unit),
-            "line_total": _to_float(total),
-            "currency": currency,
-        })
+        if "€" in sym_text:
+            currency = "EUR"
+        elif "$" in sym_text:
+            currency = "USD"
+        elif "£" in sym_text:
+            currency = "GBP"
+        items.append(
+            {
+                "description": desc,
+                "quantity": qty,
+                "unit_price": _to_float(unit),
+                "line_total": _to_float(total),
+                "currency": currency,
+            }
+        )
     return items, currency
 
-# ---------- ΝΕΟ: footer notes ----------
-def _extract_footer_notes(soup: BeautifulSoup) -> List[Dict[str, str]]:
+
+# ---------- footer notes ----------
+def _extract_footer_notes(soup: BeautifulSoup) -> list[dict[str, str]]:
     """
     Διαβάζει τα <p> κάτω από τη σύνοψη. Περιμένει μορφή:
-      <p><strong>Κάποια Ετικέτα:</strong> Κάποια τιμή</p>
-    ή γενικό "Ελεύθερο" κείμενο. Επιστρέφει [{"label","value"}] με ό,τι βρεθεί.
+      <p><strong>Ετικέτα:</strong> Τιμή</p>
+    ή γενικό κείμενο. Επιστρέφει [{"label","value"}].
     """
-    notes: List[Dict[str, str]] = []
+    notes: list[dict[str, str]] = []
     summary_div = soup.select_one("div.summary")
-    start = None
-    if summary_div:
-        start = summary_div.find_next("div")
-    else:
+    start = summary_div.find_next("div") if summary_div else None
+    if not start:
         start = soup.find("div", attrs={"style": re.compile(r"font-size\s*:\s*12px", re.I)})
-
     container = start or soup
     for p in container.find_all("p"):
         txt = _nw(p.get_text(" "))
@@ -253,15 +324,11 @@ def _extract_footer_notes(soup: BeautifulSoup) -> List[Dict[str, str]]:
             else:
                 label, value = "Σημείωση", txt
         notes.append({"label": label, "value": value})
-
     return notes
 
-# ---------- core ----------
-def parse_invoice_file(path: str) -> dict:
-    with open(path, "r", encoding="utf-8", errors="ignore") as f:
-        html = f.read()
 
-    soup = BeautifulSoup(html, _PARSER)
+# ---------- core (refactor) ----------
+def _parse_invoice_soup(soup: BeautifulSoup) -> dict[str, Any]:
     full_text = soup.get_text(" ")
 
     invoice_number = _find_invoice_number_from_text(full_text)
@@ -271,18 +338,18 @@ def parse_invoice_file(path: str) -> dict:
     details = soup.select_one(".invoice-details")
     left_text = _extract_header_left_block(details) if details else ""
     date_str, payment_method = _extract_payment_and_date(left_text)
+    if not date_str:
+        date_str = _parse_date_text(full_text)
+
     buyer = _extract_buyer_block(soup)
 
     items, items_currency = _extract_items(soup)
     subtotal, vat_amount, vat_rate, total, sum_currency = _extract_summary_amounts(soup)
     currency = sum_currency or items_currency or "EUR"
 
-    if not date_str:
-        date_str = _parse_date_text(full_text)
-
     extra_notes = _extract_footer_notes(soup)
 
-    record = {
+    record: dict[str, Any] = {
         "invoice_number": invoice_number,
         "date": date_str,
         "payment_method": payment_method,
@@ -291,7 +358,6 @@ def parse_invoice_file(path: str) -> dict:
         "vat_rate": vat_rate,
         "total": total,
         "currency": currency,
-
         # Seller
         "seller_name": seller.get("seller_name", ""),
         "seller_email": seller.get("seller_email", ""),
@@ -299,36 +365,54 @@ def parse_invoice_file(path: str) -> dict:
         "seller_vat": seller.get("seller_vat", ""),
         "seller_tax_office": seller.get("seller_tax_office", ""),
         "seller_address": seller.get("seller_address", ""),
-
         # Buyer
         "buyer_name": buyer.get("buyer_name", ""),
         "buyer_vat": buyer.get("buyer_vat", ""),
         "buyer_address": buyer.get("buyer_address", ""),
-
         # Lines & notes
         "items": items,
         "extra_notes": extra_notes,
-
-        "source_file": os.path.basename(path),
         "ext": ".html",
     }
     return record
 
-def parse_all_invoices(folder_path: str) -> List[dict]:
-    out: List[dict] = []
-    for root, _, files in os.walk(folder_path):
+
+def parse_invoice_html(html: str) -> dict[str, Any]:
+    """Parser για ΕΝΑ τιμολόγιο από HTML string."""
+    soup = BeautifulSoup(html, _PARSER)
+    return _parse_invoice_soup(soup)
+
+
+def parse_invoice_file(path: str) -> dict[str, Any]:
+    """Parser για ΕΝΑ τιμολόγιο από αρχείο .html."""
+    with open(path, encoding="utf-8", errors="ignore") as f:
+        html = f.read()
+    soup = BeautifulSoup(html, _PARSER)
+    rec = _parse_invoice_soup(soup)
+    rec["source_file"] = os.path.basename(path)
+    return rec
+
+
+def parse_all_invoices(invoices_dir: str) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for root, _, files in os.walk(invoices_dir):
         for n in files:
             if os.path.splitext(n)[1].lower() in {".html", ".htm"}:
-                p = os.path.join(root, n)
-                try:
-                    out.append(parse_invoice_file(p))
-                except Exception as e:
-                    print(f"[WARN] Failed to parse {p}: {e}")
+                path = os.path.join(root, n)
+                with suppress(Exception):
+                    with open(path, encoding="utf-8", errors="ignore") as f:
+                        html = f.read()
+                    rec = parse_invoice_html(html)
+                    rec["source_file"] = os.path.relpath(path, invoices_dir)
+                    out.append(rec)
     return out
+
 
 # ---------- CLI ----------
 if __name__ == "__main__":
-    import argparse, json
+    import argparse
+    import json
+
     ap = argparse.ArgumentParser(description="Parse HTML invoices in a folder")
     ap.add_argument("-i", "--input", required=True, help="Folder with .html invoices")
     ap.add_argument("-o", "--out", required=True, help="Output JSON (array)")

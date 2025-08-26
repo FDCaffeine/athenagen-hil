@@ -1,6 +1,20 @@
+# Python
 __pycache__/
-*.pyc
-outputs/_backups/
-outputs/*.json
-outputs/log.txt
+*.py[cod]
+*.log
+.mypy_cache/
+.pytest_cache/
+.cache/
+
+# Virtual env / IDE
 .venv/
+.env
+.vscode/
+.idea/
+
+# App-generated
+outputs/
+exports/
+
+# Streamlit
+.streamlit/secrets.toml

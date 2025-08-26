@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 parse_emails.py
@@ -13,17 +12,21 @@ import json
 import os
 import re
 import sys
-from datetime import datetime
+from collections.abc import Iterator
+from contextlib import suppress
 from email import policy
 from email.parser import BytesParser
 from email.utils import parseaddr
+from typing import Any
 
 ATTACHMENT_PLACEHOLDER_RE = re.compile(
     r"\[(?:ATTACHMENT|ΣΥΝΗΜΜΕΝΟ)\s*:\s*([^\]\n]+)\]", re.IGNORECASE
 )
 
+
 def find_placeholder_attachments(text: str):
     return [m.group(1).strip() for m in ATTACHMENT_PLACEHOLDER_RE.finditer(text or "")]
+
 
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 WS_RE = re.compile(r"\s+")
@@ -31,42 +34,98 @@ WS_RE = re.compile(r"\s+")
 PHONE_RE = re.compile(r"(?:\+?\d{1,3}[\s\-\.]?)?(?:\(?\d{2,4}\)?[\s\-\.]?)?\d{3,4}[\s\-\.]?\d{3,4}")
 
 INVOICE_KEYWORDS = [
-    "invoice", "pro forma", "proforma", "receipt", "bill", "billing", "payment",
-    "paid", "unpaid", "quotation", "quote", "purchase order", "po#", "tax invoice",
-    "τιμολ", "απόδειξη", "παραστατικ", "πληρωμ", "εξόφληση", "λογαριασμ"
+    "invoice",
+    "pro forma",
+    "proforma",
+    "receipt",
+    "bill",
+    "billing",
+    "payment",
+    "paid",
+    "unpaid",
+    "quotation",
+    "quote",
+    "purchase order",
+    "po#",
+    "tax invoice",
+    "τιμολ",
+    "απόδειξη",
+    "παραστατικ",
+    "πληρωμ",
+    "εξόφληση",
+    "λογαριασμ",
 ]
 
 INVOICE_SENDER_HINTS = ["billing", "accounts", "invoices", "accounting", "finance"]
 
 SIGNOFF_CUES = [
     # EN
-    "best regards", "kind regards", "regards", "thanks", "thank you", "sincerely",
+    "best regards",
+    "kind regards",
+    "regards",
+    "thanks",
+    "thank you",
+    "sincerely",
     # GR
-    "με εκτίμηση", "ευχαριστώ", "καλή συνέχεια", "φιλικά", "ευχαριστούμε"
+    "με εκτίμηση",
+    "ευχαριστώ",
+    "καλή συνέχεια",
+    "φιλικά",
+    "ευχαριστούμε",
 ]
 
 CLIENT_CUES = [
-    "αίτημα", "ζητάω", "ζητάμε", "θέλουμε", "ενδιαφέρον", "need", "request",
-    "platform", "system", "crm", "pos", "management", "proposal", "rfp"
+    "αίτημα",
+    "ζητάω",
+    "ζητάμε",
+    "θέλουμε",
+    "ενδιαφέρον",
+    "need",
+    "request",
+    "platform",
+    "system",
+    "crm",
+    "pos",
+    "management",
+    "proposal",
+    "rfp",
 ]
 
-INV_NUM_RE = re.compile(
-    r"(?:invoice|τιμολ)[^#\w]{0,10}(?:#\s*)?[A-Z]{0,4}-?\d{3,}", re.IGNORECASE
-)
+INV_NUM_RE = re.compile(r"(?:invoice|τιμολ)[^#\w]{0,10}(?:#\s*)?[A-Z]{0,4}-?\d{3,}", re.IGNORECASE)
 
 NOISE_TOKENS = [
-    "διεύθυνση","address","θέση","position","role","τηλ","tel","phone","email",
-    "www","site","ιστοσελίδα","έδρα","founder","ceo","owner","ιδιοκτήτης","department","τμήμα"
+    "διεύθυνση",
+    "address",
+    "θέση",
+    "position",
+    "role",
+    "τηλ",
+    "tel",
+    "phone",
+    "email",
+    "www",
+    "site",
+    "ιστοσελίδα",
+    "έδρα",
+    "founder",
+    "ceo",
+    "owner",
+    "ιδιοκτήτης",
+    "department",
+    "τμήμα",
 ]
+
 
 def normalize_ws(text: str) -> str:
     return WS_RE.sub(" ", text or "").strip()
+
 
 def strip_html(text: str) -> str:
     if not text:
         return ""
     no_tags = HTML_TAG_RE.sub(" ", text)
     return normalize_ws(no_tags)
+
 
 def get_bodies(msg) -> tuple[str, str]:
     """
@@ -90,7 +149,9 @@ def get_bodies(msg) -> tuple[str, str]:
                 try:
                     payload = part.get_payload(decode=True)
                     if isinstance(payload, bytes):
-                        payload = payload.decode(part.get_content_charset() or "utf-8", errors="ignore")
+                        payload = payload.decode(
+                            part.get_content_charset() or "utf-8", errors="ignore"
+                        )
                 except Exception:
                     payload = ""
             if ctype == "text/plain":
@@ -124,6 +185,7 @@ def get_bodies(msg) -> tuple[str, str]:
 
     return body_text, body_html
 
+
 def has_pdf_attachments_and_names(msg, body_text: str):
     pdf = False
     names = []
@@ -142,23 +204,32 @@ def has_pdf_attachments_and_names(msg, body_text: str):
 
     return pdf, names, bool(ph)
 
+
 def guess_email_type(subject: str, body_text: str, from_addr: str, attachment_names) -> str:
     subj = (subject or "").lower()
-    bod  = (body_text or "").lower()
-    local = (from_addr.split("@",1)[0].lower() if "@" in from_addr else from_addr.lower())
+    bod = (body_text or "").lower()
+    local = from_addr.split("@", 1)[0].lower() if "@" in from_addr else from_addr.lower()
     names = [(n or "").lower() for n in (attachment_names or [])]
     pdf_count = sum(1 for n in names if n.endswith(".pdf"))
 
     score = 0
-    if any(kw in subj for kw in INVOICE_KEYWORDS): score += 4
-    if any(kw in bod  for kw in INVOICE_KEYWORDS): score += 1
-    if INV_NUM_RE.search(subject or ""):           score += 2
-    if any(h in local for h in INVOICE_SENDER_HINTS): score += 2
-    if pdf_count >= 1:                              score += 3
-    if any(("invoice" in n) or ("τιμολ" in n) or ("receipt" in n) for n in names): score += 3
+    if any(kw in subj for kw in INVOICE_KEYWORDS):
+        score += 4
+    if any(kw in bod for kw in INVOICE_KEYWORDS):
+        score += 1
+    if INV_NUM_RE.search(subject or ""):
+        score += 2
+    if any(h in local for h in INVOICE_SENDER_HINTS):
+        score += 2
+    if pdf_count >= 1:
+        score += 3
+    if any(("invoice" in n) or ("τιμολ" in n) or ("receipt" in n) for n in names):
+        score += 3
 
-    if any(c in subj for c in CLIENT_CUES): score -= 2
-    if any(c in bod  for c in CLIENT_CUES): score -= 1
+    if any(c in subj for c in CLIENT_CUES):
+        score -= 2
+    if any(c in bod for c in CLIENT_CUES):
+        score -= 1
 
     no_invoice_signals = (
         pdf_count == 0
@@ -172,9 +243,11 @@ def guess_email_type(subject: str, body_text: str, from_addr: str, attachment_na
 
     return "invoice" if score >= 4 else "client"
 
+
 def extract_email_and_name(from_header: str):
     name, addr = parseaddr(from_header or "")
     return normalize_ws(name), (addr or "").strip().lower()
+
 
 def extract_phone(text: str) -> str:
     if not text:
@@ -187,10 +260,12 @@ def extract_phone(text: str) -> str:
             candidates.append(digits)
     return max(candidates, key=len) if candidates else ""
 
+
 def titlecase_safe(s: str) -> str:
     if not s:
         return s
     return " ".join(part.capitalize() for part in re.split(r"[\s._-]+", s) if part)
+
 
 def clean_company(text: str) -> str:
     if not text:
@@ -203,14 +278,15 @@ def clean_company(text: str) -> str:
             return p.strip()
     return normalize_ws(parts[0])[:60].strip() if parts else ""
 
+
 def guess_company(from_name: str, from_email: str, body_text: str) -> str:
-    text = (body_text or "")
+    text = body_text or ""
     # 1) υπογραφή
     sig_lines = []
     for cue in SIGNOFF_CUES:
         idx = text.lower().find(cue)
         if idx != -1:
-            sig_lines.append(text[idx: idx + 400])
+            sig_lines.append(text[idx : idx + 400])
     candidate_block = "\n".join(sig_lines) if sig_lines else text[:800]
 
     company_patterns = [
@@ -222,7 +298,11 @@ def guess_company(from_name: str, from_email: str, body_text: str) -> str:
         m = re.search(pat, candidate_block, flags=re.IGNORECASE)
         if m:
             c = normalize_ws(m.group(1))
-            c = re.split(r"(?:email|e-mail|τηλ|tel|phone|mobile|mob|www|site|address)[:\s]", c, flags=re.IGNORECASE)[0]
+            c = re.split(
+                r"(?:email|e-mail|τηλ|tel|phone|mobile|mob|www|site|address)[:\s]",
+                c,
+                flags=re.IGNORECASE,
+            )[0]
             return c.strip(" -|·:;,")
 
     # domain -> brand guess
@@ -242,6 +322,7 @@ def guess_company(from_name: str, from_email: str, body_text: str) -> str:
 
     return ""
 
+
 def guess_person_name(from_name: str, body_text: str) -> str:
     if from_name and len(from_name) >= 2:
         return from_name
@@ -250,14 +331,18 @@ def guess_person_name(from_name: str, body_text: str) -> str:
     for cue in SIGNOFF_CUES:
         i = low.find(cue)
         if i != -1:
-            tail = body_text[i:i+240]
-            lines = [normalize_ws(l) for l in tail.splitlines()]
-            lines = [l for l in lines if l and l.lower() not in SIGNOFF_CUES]
+            tail = body_text[i : i + 240]
+            lines = [normalize_ws(line) for line in tail.splitlines()]
+            lines = [line for line in lines if line and line.lower() not in SIGNOFF_CUES]
             if len(lines) >= 2:
                 candidate = lines[1]
-                if 2 <= len(candidate) <= 60 and not any(tok in candidate.lower() for tok in ["tel", "phone", "email", "@", "www", "http"]):
+                if 2 <= len(candidate) <= 60 and not any(
+                    tok in candidate.lower()
+                    for tok in ["tel", "phone", "email", "@", "www", "http"]
+                ):
                     return candidate
     return ""
+
 
 def parse_eml_file(path: str) -> dict:
     with open(path, "rb") as f:
@@ -298,38 +383,34 @@ def parse_eml_file(path: str) -> dict:
         "subject": normalize_ws(subject),
         "date": date,
         "source_file": os.path.basename(path),
-
         # NEW fields
-        "body": body_text,          # plain text (καθαρισμένο)
-        "body_html": body_html,     # raw html αν υπάρχει
+        "body": body_text,  # plain text (καθαρισμένο)
+        "body_html": body_html,  # raw html αν υπάρχει
         "body_preview": body_preview,
     }
     return record
 
-def iter_eml_files(input_path: str):
-    if os.path.isfile(input_path):
-        if input_path.lower().endswith(".eml"):
-            yield input_path
-        else:
-            return
-    else:
-        for root, _, files in os.walk(input_path):
-            for name in files:
-                if name.lower().endswith(".eml"):
-                    yield os.path.join(root, name)
 
-def parse_all_emails(folder_path: str) -> list[dict]:
-    results = []
-    for eml_path in iter_eml_files(folder_path):
-        try:
+def iter_eml_files(root: str) -> Iterator[str]:
+    for r, _, files in os.walk(root):
+        for n in files:
+            if n.lower().endswith(".eml"):
+                yield os.path.join(r, n)
+
+
+def parse_all_emails(emails_dir: str) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    for eml_path in iter_eml_files(emails_dir):
+        with suppress(Exception):
             results.append(parse_eml_file(eml_path))
-        except Exception as e:
-            print(f"[WARN] Failed to parse {eml_path}: {e}")
     return results
+
 
 def main():
     parser = argparse.ArgumentParser(description="Parse .eml files and extract basic info.")
-    parser.add_argument("--input", "-i", required=True, help="Path to .eml file or directory containing .eml files")
+    parser.add_argument(
+        "--input", "-i", required=True, help="Path to .eml file or directory containing .eml files"
+    )
     parser.add_argument("--out", "-o", required=True, help="Output JSONL path")
     args = parser.parse_args()
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
@@ -345,6 +426,7 @@ def main():
                 sys.stderr.write(f"[WARN] Failed to parse {eml_path}: {e}\n")
 
     print(f"✅ Parsed {count} email(s) -> {args.out}")
+
 
 if __name__ == "__main__":
     main()

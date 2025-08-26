@@ -1,0 +1,40 @@
+[project]
+name = "athenagen-hil"
+version = "0.1.0"
+description = "AthenaGen – Human-in-the-Loop Review UI + parsers"
+requires-python = ">=3.10"
+readme = "README.md"
+
+[project.scripts]
+athenagen-run = "main:main"
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E","F","I","UP","SIM"]
+ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+exclude = '(^\.venv/|^outputs/|^exports/)'
+ignore_missing_imports = true
+strict_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disable_error_code = ["no-untyped-def","attr-defined","union-attr","arg-type","misc"]
+check_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

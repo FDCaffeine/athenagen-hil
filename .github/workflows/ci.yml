@@ -1,0 +1,41 @@
+name: CI
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements*.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      - name: Export PYTHONPATH
+        run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+
+      - name: Install runtime deps
+        run: |
+
+      - name: Install dev deps
+        run: |
+
+      # Κρατάμε απόλυτη ισοτιμία με το local: τρέχουμε pre-commit για black/ruff/mypy
+      - name: Pre-commit (black/ruff/mypy)
+        run: python -m pre_commit run --all-files --show-diff-on-failure
+
+      - name: Tests
+        run: python -m pytest -q
+        
+      - name: Tests (coverage)
+        run: pytest --cov=. --cov-report=term-missing

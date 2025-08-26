@@ -1,0 +1,1 @@
+# requirements-dev.txtblack>=24ruff>=0.6mypy>=1.10pytest>=8pre-commit>=3.7

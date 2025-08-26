@@ -1,7 +1,10 @@
 # data_parser/parse_forms.py
-from bs4 import BeautifulSoup
 import os
 import re
+from typing import Any
+
+from bs4 import BeautifulSoup
+
 
 def _pick_parser() -> str:
     """
@@ -17,13 +20,16 @@ def _pick_parser() -> str:
             continue
     return "html.parser"
 
+
 _PARSER = _pick_parser()
+
 
 def _normalize_phone(phone: str | None) -> str | None:
     """Καθαρίζει αριθμούς τηλεφώνου (κρατάει μόνο ψηφία και '+')."""
     if not phone:
         return None
     return re.sub(r"[^\d+]", "", phone)
+
 
 def _get_input_value(soup: BeautifulSoup, name: str):
     """Επιστρέφει την τιμή ενός input/select/textarea με συγκεκριμένο name."""
@@ -44,6 +50,7 @@ def _get_input_value(soup: BeautifulSoup, name: str):
 
     # input -> value attribute
     return (el.get("value") or "").strip()
+
 
 def parse_form(html_content: str) -> dict:
     """Παίρνει HTML φόρμας και επιστρέφει dict με τα βασικά πεδία."""
@@ -68,23 +75,26 @@ def parse_form(html_content: str) -> dict:
         "service": service,
         "message": message,
         "submission_date": submission_date,
-        "priority": priority
+        "priority": priority,
     }
 
-def parse_all_forms(folder_path: str) -> list[dict]:
+
+def parse_all_forms(forms_dir: str) -> list[dict[str, Any]]:
     """Διαβάζει όλα τα HTML αρχεία φόρμας από τον φάκελο και τα επιστρέφει ως λίστα dicts."""
-    extracted = []
-    for filename in os.listdir(folder_path):
+    extracted: list[dict[str, Any]] = []
+    for filename in os.listdir(forms_dir):  # <-- forms_dir
         if filename.lower().endswith(".html"):
-            full_path = os.path.join(folder_path, filename)
-            with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+            full_path = os.path.join(forms_dir, filename)  # <-- forms_dir
+            with open(full_path, encoding="utf-8", errors="ignore") as f:
                 data = parse_form(f.read())
-                data["source_file"] = filename
-                extracted.append(data)
+            data["source_file"] = filename
+            extracted.append(data)
     return extracted
+
 
 if __name__ == "__main__":
     import json
+
     folder = "dummy_data/forms"
     parsed = parse_all_forms(folder)
     print(json.dumps(parsed, indent=2, ensure_ascii=False))
