@@ -4,6 +4,11 @@ on:
     branches: ["**"]
   pull_request:
 
+# Ακυρώνει παλαιότερα runs στο ίδιο branch
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ci:
     runs-on: ubuntu-latest
@@ -16,6 +21,7 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
+      # (προαιρετικό) pip cache επιπλέον
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pip
@@ -24,6 +30,25 @@ jobs:
 
       - name: Export PYTHONPATH
         run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+
+      # Γράψε τα secrets σε αρχεία ΜΟΝΟ αν υπάρχουν στα repo secrets
+      - name: Write GCP SA key (optional)
+        if: ${{ secrets.GCP_SA_JSON != '' }}
+        shell: bash
+        env:
+          GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
+        run: |
+          printf '%s' "$GCP_SA_JSON" > gcp-sa.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$PWD/gcp-sa.json" >> $GITHUB_ENV
+
+      - name: Write Streamlit secrets (optional)
+        if: ${{ secrets.STREAMLIT_SECRETS != '' }}
+        shell: bash
+        env:
+          STREAMLIT_SECRETS: ${{ secrets.STREAMLIT_SECRETS }}
+        run: |
+          mkdir -p .streamlit
+          printf '%s' "$STREAMLIT_SECRETS" > .streamlit/secrets.toml
 
       - name: Install dependencies
         shell: bash
@@ -34,7 +59,7 @@ jobs:
           # Ensure pytest & coverage are available even if not in requirements
           pip install pytest pytest-cov || true
 
-      # Κρατάμε απόλυτη ισοτιμία με το local: τρέχουμε pre-commit για black/ruff/mypy
+      # Κρατάμε ισοτιμία με local: pre-commit (black/ruff/mypy)
       - name: Pre-commit (black/ruff/mypy)
         uses: pre-commit/action@v3.0.1
         with:
