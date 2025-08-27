@@ -7,6 +7,7 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -14,7 +15,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
-          
+
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pip
@@ -24,18 +25,20 @@ jobs:
       - name: Export PYTHONPATH
         run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
 
-      - name: Install runtime deps
+      - name: Install dependencies
+        shell: bash
         run: |
-
-      - name: Install dev deps
-        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt || true
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          # Ensure pytest & coverage are available even if not in requirements
+          pip install pytest pytest-cov || true
 
       # Κρατάμε απόλυτη ισοτιμία με το local: τρέχουμε pre-commit για black/ruff/mypy
       - name: Pre-commit (black/ruff/mypy)
-        run: python -m pre_commit run --all-files --show-diff-on-failure
+        uses: pre-commit/action@v3.0.1
+        with:
+          extra_args: --all-files --show-diff-on-failure
 
-      - name: Tests
-        run: python -m pytest -q
-        
       - name: Tests (coverage)
-        run: pytest --cov=. --cov-report=term-missing
+        run: pytest -q --cov=. --cov-report=term-missing
