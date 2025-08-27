@@ -16,5 +16,14 @@ __pycache__/
 outputs/
 exports/
 
-# Streamlit
-.streamlit/secrets.tomlgcp-sa.json
+# Streamlit / Secrets
+.streamlit/secrets.toml
+gcp-sa.json
+
+# Tests / Coverage (optional)
+.coverage
+htmlcov/
+
+# OS junk (optional)
+.DS_Store
+Thumbs.db
