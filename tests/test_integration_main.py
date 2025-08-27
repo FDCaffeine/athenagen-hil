@@ -1,6 +1,6 @@
 import unittest
 
-from tests.utils import ALLOWED_SOURCES, ALLOWED_STATUS, load_combined
+from .utils import ALLOWED_SOURCES, ALLOWED_STATUS, load_combined
 
 
 class TestIntegrationMain(unittest.TestCase):

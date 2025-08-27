@@ -1,6 +1,6 @@
 import unittest
 
-from tests.utils import template_headers
+from .utils import template_headers
 
 
 class TestTemplateExists(unittest.TestCase):

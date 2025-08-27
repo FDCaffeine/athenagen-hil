@@ -1,6 +1,6 @@
 import unittest
 
-from tests.utils import load_combined
+from .utils import load_combined
 
 
 class TestInvoicesBasic(unittest.TestCase):
