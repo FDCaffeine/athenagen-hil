@@ -4,7 +4,7 @@ on:
     branches: ["**"]
   pull_request:
 
-# Ακυρώνει παλαιότερα runs στο ίδιο branch
+# Ακύρωση παλαιότερων runs στο ίδιο branch
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -21,7 +21,6 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      # (προαιρετικό) pip cache επιπλέον
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pip
@@ -31,24 +30,30 @@ jobs:
       - name: Export PYTHONPATH
         run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
 
-      # Γράψε τα secrets σε αρχεία ΜΟΝΟ αν υπάρχουν στα repo secrets
-      - name: Write GCP SA key (optional)
-        if: ${{ secrets.GCP_SA_JSON != '' }}
+      # Γράφει key μόνο αν υπάρχει secret
+      - name: Write GCP SA key (if present)
         shell: bash
         env:
           GCP_SA_JSON: ${{ secrets.GCP_SA_JSON }}
         run: |
-          printf '%s' "$GCP_SA_JSON" > gcp-sa.json
-          echo "GOOGLE_APPLICATION_CREDENTIALS=$PWD/gcp-sa.json" >> $GITHUB_ENV
+          if [ -n "$GCP_SA_JSON" ]; then
+            printf '%s' "$GCP_SA_JSON" > gcp-sa.json
+            echo "GOOGLE_APPLICATION_CREDENTIALS=$PWD/gcp-sa.json" >> $GITHUB_ENV
+          else
+            echo "No GCP_SA_JSON secret set; skipping."
+          fi
 
-      - name: Write Streamlit secrets (optional)
-        if: ${{ secrets.STREAMLIT_SECRETS != '' }}
+      - name: Write Streamlit secrets (if present)
         shell: bash
         env:
           STREAMLIT_SECRETS: ${{ secrets.STREAMLIT_SECRETS }}
         run: |
-          mkdir -p .streamlit
-          printf '%s' "$STREAMLIT_SECRETS" > .streamlit/secrets.toml
+          if [ -n "$STREAMLIT_SECRETS" ]; then
+            mkdir -p .streamlit
+            printf '%s' "$STREAMLIT_SECRETS" > .streamlit/secrets.toml
+          else
+            echo "No STREAMLIT_SECRETS set; skipping."
+          fi
 
       - name: Install dependencies
         shell: bash
@@ -56,10 +61,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt || true
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-          # Ensure pytest & coverage are available even if not in requirements
           pip install pytest pytest-cov || true
 
-      # Κρατάμε ισοτιμία με local: pre-commit (black/ruff/mypy)
+      # Pre-commit (black/ruff/mypy)
       - name: Pre-commit (black/ruff/mypy)
         uses: pre-commit/action@v3.0.1
         with:
