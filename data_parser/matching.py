@@ -5,7 +5,7 @@ from typing import Any
 
 try:
     # προαιρετικό: καλύτερο fuzzy
-    from rapidfuzz import fuzz  # type: ignore[import-not-found]
+    from rapidfuzz import fuzz
 
     HAS_RAPIDFUZZ = True
 except Exception:  # rapidfuzz δεν είναι εγκατεστημένο

@@ -38,13 +38,13 @@ HAS_VALIDATION = False
 
 try:
     from data_parser.matching import (
-        build_invoice_lookup as _build_lookup_ext,  # type: ignore[attr-defined]
+        build_invoice_lookup as _build_lookup_ext,
     )
     from data_parser.matching import (
-        fuzzy_find as _fuzzy_find_ext,  # type: ignore[attr-defined]
+        fuzzy_find as _fuzzy_find_ext,
     )
     from data_parser.matching import (
-        normalize_inv as _norm_inv_ext,  # type: ignore[attr-defined]
+        normalize_inv as _norm_inv_ext,
     )
 
     HAS_MATCHING = True
@@ -74,13 +74,13 @@ except Exception:
 
 try:
     from data_parser.validation import (
-        validate_email_record as _validate_email_ext,  # type: ignore[attr-defined]
+        validate_email_record as _validate_email_ext,
     )
     from data_parser.validation import (
-        validate_form_record as _validate_form_ext,  # type: ignore[attr-defined]
+        validate_form_record as _validate_form_ext,
     )
     from data_parser.validation import (
-        validate_invoice_record as _validate_invoice_ext,  # type: ignore[attr-defined]
+        validate_invoice_record as _validate_invoice_ext,
     )
 
     HAS_VALIDATION = True
