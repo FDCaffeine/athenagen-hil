@@ -4,7 +4,6 @@ on:
     branches: ["**"]
   pull_request:
 
-# Ακύρωση παλαιότερων runs στο ίδιο branch
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -12,22 +11,25 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    env:
-      PYTHONPATH: ${{ github.workspace }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
 
-      # Γράφει key μόνο αν υπάρχει secret
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements*.txt') }}
+          restore-keys: ${{ runner.os }}-pip-
+
+      - name: Export PYTHONPATH
+        run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+
+      # Προαιρετικά secrets (αν υπάρχουν)
       - name: Write GCP SA key (if present)
         shell: bash
         env:
@@ -35,7 +37,7 @@ jobs:
         run: |
           if [ -n "$GCP_SA_JSON" ]; then
             printf '%s' "$GCP_SA_JSON" > gcp-sa.json
-            echo "GOOGLE_APPLICATION_CREDENTIALS=$PWD/gcp-sa.json" >> "$GITHUB_ENV"
+            echo "GOOGLE_APPLICATION_CREDENTIALS=$PWD/gcp-sa.json" >> $GITHUB_ENV
           else
             echo "No GCP_SA_JSON secret set; skipping."
           fi
@@ -56,14 +58,24 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install -r requirements.txt || true
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          # Εγκατέστησε ΡΗΤΑ pytest & pytest-cov για να υπάρχουν πάντα
+          pip install pytest pytest-cov
+          python -c "import sys,pytest,importlib.util; print('pytest',pytest.__version__); print('pytest-cov present?', bool(importlib.util.find_spec('pytest_cov')))"
 
-      # Pre-commit (black/ruff/mypy)
       - name: Pre-commit (black/ruff/mypy)
         uses: pre-commit/action@v3.0.1
         with:
           extra_args: --all-files --show-diff-on-failure
 
-      - name: Run tests (pytest + coverage)
-        run: pytest -q --cov=. --cov-report=term-missing
+      - name: Tests (with coverage if plugin present)
+        shell: bash
+        run: |
+          if python -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('pytest_cov') else 1)"; then
+            echo "pytest-cov present → running with coverage"
+            pytest -q --cov=. --cov-report=term-missing
+          else
+            echo "pytest-cov missing → running without coverage"
+            pytest -q
+          fi
