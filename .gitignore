@@ -1,29 +1,49 @@
-# Python
+# --- Python ---
 __pycache__/
 *.py[cod]
 *.log
 .mypy_cache/
 .pytest_cache/
+.ruff_cache/
 .cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+__pypackages__/
 
-# Virtual env / IDE
+# --- Virtual env / IDE ---
 .venv/
 .env
+.env.*
 .vscode/
 .idea/
+.python-version
 
-# App-generated
+# --- App-generated ---
 outputs/
 exports/
 
-# Streamlit / Secrets
+# (αν θέλεις να κρατάς άδειους φακέλους στο repo, βάλε .gitkeep και ξε-αγνόησέ το)
+# outputs/*
+# !outputs/.gitkeep
+# exports/*
+# !exports/.gitkeep
+
+# --- Streamlit / Secrets ---
 .streamlit/secrets.toml
 gcp-sa.json
 
-# Tests / Coverage (optional)
-.coverage
-htmlcov/
+# --- Tests / tooling (optional) ---
+.tox/
+.hypothesis/
+coverage.xml
 
-# OS junk (optional)
+# --- OS junk ---
 .DS_Store
 Thumbs.db
+
+# --- Editor swap/backup (optional) ---
+*.swp
+*.swo
+*~

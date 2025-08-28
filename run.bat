@@ -124,7 +124,6 @@ echo Εκκίνηση εφαρμογής Streamlit...
 echo Αν δεν ανοίξει αυτόματα, άνοιξε: http://localhost:8501
 echo.
 
-start "" http://localhost:8501
 python -m streamlit run app.py
 set "EXITCODE=%ERRORLEVEL%"
 goto :end
