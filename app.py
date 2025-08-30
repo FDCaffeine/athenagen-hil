@@ -1,9 +1,12 @@
 # app.py
+from __future__ import annotations
+
 import json
 import os
 import re
 import uuid
 from datetime import datetime
+from io import BytesIO
 from os import PathLike
 from pathlib import Path
 from typing import Any
@@ -12,40 +15,20 @@ import pandas as pd  # για data_editor/exports
 import streamlit as st
 import streamlit.components.v1 as components
 
-from settings import (
-    BACKUPS_DIR,
-    EXPORTS_DIR,
-    LOG_PATH,
-    OUTPUTS_DIR,
-)
+from settings import BACKUPS_DIR, EXPORTS_DIR, LOG_PATH, OUTPUTS_DIR
 from settings import COMBINED_PATH as DATA_PATH
 from settings import EMAILS_DIR as DUMMY_EMAILS_DIR
 from settings import FORMS_DIR as DUMMY_FORMS_DIR
 from settings import INVOICES_DIR as DUMMY_INVOICES_DIR
-
-# ---------- Google Sheets deps ----------
-# pip install gspread google-auth gspread-dataframe
-try:
-    import gspread
-    from google.oauth2.service_account import Credentials
-except Exception:  # θα χειριστούμε στο UI αν λείπουν
-    gspread = None
-    Credentials = None
 
 # ---------- Προαιρετικά: Fuzzy matching & Validation ----------
 HAS_MATCHING = False
 HAS_VALIDATION = False
 
 try:
-    from data_parser.matching import (
-        build_invoice_lookup as _build_lookup_ext,
-    )
-    from data_parser.matching import (
-        fuzzy_find as _fuzzy_find_ext,
-    )
-    from data_parser.matching import (
-        normalize_inv as _norm_inv_ext,
-    )
+    from data_parser.matching import build_invoice_lookup as _build_lookup_ext
+    from data_parser.matching import fuzzy_find as _fuzzy_find_ext
+    from data_parser.matching import normalize_inv as _norm_inv_ext
 
     HAS_MATCHING = True
 except Exception:
@@ -62,7 +45,9 @@ except Exception:
             if r.get("source") == "invoice_html" and r.get("invoice_number")
         }
 
-    def _fuzzy_find_ext(candidate: str, lookup: dict[str, Any], score_cutoff: int = 0):
+    def _fuzzy_find_ext(
+        candidate: str, lookup: dict[str, Any], score_cutoff: int = 0
+    ) -> tuple[dict[str, Any] | None, int]:
         key = _norm_inv_ext(candidate)
         if key in lookup:
             return lookup[key], 100
@@ -73,26 +58,20 @@ except Exception:
 
 
 try:
-    from data_parser.validation import (
-        validate_email_record as _validate_email_ext,
-    )
-    from data_parser.validation import (
-        validate_form_record as _validate_form_ext,
-    )
-    from data_parser.validation import (
-        validate_invoice_record as _validate_invoice_ext,
-    )
+    from data_parser.validation import validate_email_record as _validate_email_ext
+    from data_parser.validation import validate_form_record as _validate_form_ext
+    from data_parser.validation import validate_invoice_record as _validate_invoice_ext
 
     HAS_VALIDATION = True
 except Exception:
 
-    def _validate_email_ext(d: dict):
+    def _validate_email_ext(d: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         return d, []
 
-    def _validate_form_ext(d: dict):
+    def _validate_form_ext(d: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         return d, []
 
-    def _validate_invoice_ext(d: dict):
+    def _validate_invoice_ext(d: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         return d, []
 
 
@@ -580,7 +559,9 @@ def read_template_columns(path: str | PathLike[str]) -> list[str] | None:
 
 
 def _norm(s: str) -> str:
-    return "".join(ch for ch in s.lower().strip() if ch.isalnum())
+    # Αποφυγή walrus για συμβατότητα με εργαλεία/παρσάρισμα
+    s2 = s.lower().strip()
+    return "".join(ch for ch in s2 if ch.isalnum())
 
 
 def build_template_mapping(template_cols: list[str]) -> dict[str, str]:
@@ -665,15 +646,20 @@ def build_template_df(
 ) -> pd.DataFrame:
     header_map = build_template_mapping(template_cols)
 
-    def _lookup_invoice(inv_no: str | None):
-        if not inv_no or not invoice_index:
+    def _lookup_invoice(inv_no: str | None) -> dict[str, Any] | None:
+        if not invoice_index:
             return None
-        return invoice_index.get(inv_no) or invoice_index.get(_norm_invoice_no_local(inv_no))
+        if not inv_no or not isinstance(inv_no, str):
+            return None
+        inv_key = inv_no
+        return invoice_index.get(inv_key) or invoice_index.get(_norm_invoice_no_local(inv_key))
 
-    rows = []
+    rows: list[dict[str, Any]] = []
+
     for r in records:
         src = (r.get("source") or "").strip()
 
+        # --- date ---
         if src == "form":
             date_val = _coalesce(r.get("submission_date"), r.get("created_at"))
         elif src == "email":
@@ -682,6 +668,7 @@ def build_template_df(
             date_val = _coalesce(r.get("date"), r.get("created_at"))
         date_val = _as_date_str(date_val)
 
+        # --- type ---
         if src == "invoice_html":
             type_val = "invoice"
         elif src == "email":
@@ -689,34 +676,31 @@ def build_template_df(
         else:
             type_val = "form"
 
+        # --- identity fields ---
         client_name = _coalesce(
             r.get("buyer_name"),
             r.get("full_name"),
             r.get("name"),
             r.get("from_name"),
         )
-
-        company = _coalesce(
-            r.get("company"),
-            r.get("buyer_name"),
-            r.get("seller_name"),
-        )
-
+        company = _coalesce(r.get("company"), r.get("buyer_name"), r.get("seller_name"))
         service_interest = _coalesce(r.get("service"), r.get("service_interest"))
 
-        inv_no = _coalesce(r.get("invoice_number"), r.get("invoice_number_in_subject"))
-        inv_no_str = str(inv_no) if inv_no != "" else ""
+        # --- invoice number (as string ή κενό) ---
+        inv_no_val = _coalesce(r.get("invoice_number"), r.get("invoice_number_in_subject"))
+        inv_no_str = str(inv_no_val) if inv_no_val != "" else ""
 
+        # --- amounts ---
         if src == "invoice_html":
             amount = _as_float(r.get("subtotal"))
             vat = _as_float(r.get("vat_amount"))
             total_amount = _as_float(_coalesce(r.get("total")))
         elif src == "email":
-            inv = _lookup_invoice(inv_no)
-            if inv:
-                amount = _as_float(inv.get("subtotal"))
-                vat = _as_float(inv.get("vat_amount"))
-                total_amount = _as_float(inv.get("total"))
+            inv_rec = _lookup_invoice(inv_no_str if inv_no_str else None)
+            if inv_rec:
+                amount = _as_float(inv_rec.get("subtotal"))
+                vat = _as_float(inv_rec.get("vat_amount"))
+                total_amount = _as_float(inv_rec.get("total"))
             else:
                 amount = ""
                 vat = ""
@@ -726,6 +710,7 @@ def build_template_df(
             vat = ""
             total_amount = ""
 
+        # --- message ---
         if src == "form":
             message = _coalesce(r.get("message"))
         elif src == "email":
@@ -736,7 +721,7 @@ def build_template_df(
                 try:
                     message = " | ".join(
                         [
-                            f"{(n or {}).get('label','')}: {(n or {}).get('value','')}".strip(
+                            f"{(n or {}).get('label', '')}: {(n or {}).get('value', '')}".strip(
                                 ": "
                             ).strip()
                             for n in notes
@@ -774,7 +759,7 @@ def build_template_df(
             "id": rid,
         }
 
-        row = {}
+        row: dict[str, Any] = {}
         for col in template_cols:
             internal_key = header_map.get(col, "")
             if internal_key:
@@ -794,8 +779,7 @@ def build_template_df(
 
         rows.append(row)
 
-    df = pd.DataFrame(rows, columns=template_cols)
-    return df
+    return pd.DataFrame(rows, columns=template_cols)
 
 
 def pretty_email_body(text: str) -> str:
@@ -864,13 +848,18 @@ def _detect_creds_from_sources(pasted_json: str | None) -> tuple[dict | None, st
 
 
 def _build_client(creds_dict: dict):
-    if not gspread or not Credentials:
+    try:
+        import gspread  # lazy import
+        from google.oauth2.service_account import Credentials
+    except Exception as e:
         raise RuntimeError(
             "Λείπουν οι βιβλιοθήκες gspread / google-auth. Τρέξε: pip install gspread google-auth"
-        )
+        ) from e
+
     creds = Credentials.from_service_account_info(creds_dict, scopes=GSPREAD_SCOPES)
     gc = gspread.authorize(creds)
-    return gc
+    # Επιστρέφουμε και το WorksheetNotFound για χρήση στο except χωρίς global import
+    return gc, gspread.WorksheetNotFound
 
 
 def upload_dataframe_to_sheet(
@@ -880,13 +869,15 @@ def upload_dataframe_to_sheet(
     creds_dict: dict,
     mode: str = "replace",
 ):
-    gc = _build_client(creds_dict)
+    gc, WorksheetNotFound = _build_client(creds_dict)
     sh = gc.open_by_key(sheet_id)
     try:
         ws = sh.worksheet(worksheet_name)
-    except gspread.WorksheetNotFound:
+    except WorksheetNotFound:
         ws = sh.add_worksheet(
-            title=worksheet_name, rows=max(len(df) + 10, 1000), cols=max(len(df.columns) + 5, 26)
+            title=worksheet_name,
+            rows=max(len(df) + 10, 1000),
+            cols=max(len(df.columns) + 5, 26),
         )
     values = [list(df.columns)] + df.astype(object).where(pd.notnull(df), "").values.tolist()
     if mode == "replace":
@@ -911,25 +902,27 @@ def run_app() -> None:
 
     data = load_data()
 
-    # index για parsed τιμολόγια (raw + normalized)
+    # index για parsed τιμολόγια (raw + normalized) — explicit types + None-safety
+    invoice_index: dict[str, dict[str, Any]] = {}
+    invoice_index_combined: dict[str, dict[str, Any]] = {}
     try:
         invoice_index = {
-            r.get("invoice_number"): r
+            str(r["invoice_number"]): r
             for r in data
             if r.get("source") == "invoice_html" and r.get("invoice_number")
         }
-        invoice_index_norm = {
-            _norm_invoice_no_local(r.get("invoice_number")): r
+        invoice_index_norm: dict[str, dict[str, Any]] = {
+            _norm_invoice_no_local(str(r["invoice_number"])): r
             for r in data
             if r.get("source") == "invoice_html" and r.get("invoice_number")
         }
-        invoice_index_combined = {**invoice_index_norm, **invoice_index}
-    except Exception as e:
-        invoice_index = {}
-        invoice_index_combined = {}
-        ui_warn("Σφάλμα δημιουργίας invoice index.", "invoice_index_error", {"error": str(e)})
 
-    # Sidebar
+        # normalized wins for lookups, but keep raw too
+        invoice_index_combined = {**invoice_index_norm, **invoice_index}
+    except Exception as exc:
+        ui_warn("Σφάλμα δημιουργίας invoice index.", "invoice_index_error", {"error": str(exc)})
+
+    # Sidebar (Filters / Rebuild)
     with st.sidebar:
         # --- Language switch (one-click, instant) ---
         current_lang = _get_lang()
@@ -1138,15 +1131,195 @@ def run_app() -> None:
     except Exception as e:
         ui_warn("Αποτυχία ταξινόμησης. Εμφάνιση χωρίς ταξινόμηση.", "sort_error", {"error": str(e)})
 
-    # Sidebar: list of records
+    # Sidebar: list of records + EXPORT UI
     with st.sidebar:
         st.subheader(f"{t('RESULTS')}: {len(view)}")
-        labels = []
+
+        # ---- Export block (AFTER view is computed) ----
+        st.markdown("---")
+        st.subheader(t("EXPORT"))
+
+        scope = st.radio(t("FILTERED") + " / " + t("ALL"), [t("FILTERED"), t("ALL")], index=0)
+
+        dest_choice = st.selectbox(
+            t("DESTINATION"), [t("DEST_CSV"), t("DEST_XLSX"), t("DEST_GSHEETS")]
+        )
+
+        # Template columns
+        st.caption("Header template (CSV with 1st row as columns)")
+        template_file = st.file_uploader(
+            "CSV header template", type=["csv"], accept_multiple_files=False, key="tpl_upload"
+        )
+        if template_file is not None:
+            try:
+                # read just the header
+                df0 = pd.read_csv(
+                    template_file, nrows=0, sep=None, engine="python", encoding="utf-8"
+                )
+                template_cols = [str(c).strip() for c in list(df0.columns)]
+            except Exception:
+                template_cols = []
+        else:
+            # Sensible default columns
+            template_cols = [
+                "type",
+                "source",
+                "date",
+                "client_name",
+                "company",
+                "service_interest",
+                "amount",
+                "vat",
+                "total_amount",
+                "invoice_number",
+                "message",
+                "email",
+                "phone",
+                "subject",
+                "status",
+                "source_file",
+                "id",
+            ]
+
+        save_copy = st.checkbox(t("SAVE_COPY"), value=True)
+        fname_prefix = st.text_input(t("FILENAME_PREFIX"), value="export")
+
+        # Google Sheets specific inputs (only shown if selected)
+        sheet_id_input = ""
+        worksheet_input = "Sheet1"
+        mode_input = t("REPLACE")
+        creds_paste = ""
+        if dest_choice == t("DEST_GSHEETS"):
+            st.markdown(t("TARGET_SHEET_CAPTION"))
+            sheet_url_or_id = st.text_input(t("TARGET_SHEET"), value="")
+            worksheet_input = st.text_input(t("WORKSHEET"), value="Sheet1")
+            mode_input = st.selectbox(t("UPLOAD_MODE"), [t("REPLACE"), t("APPEND")], index=0)
+            creds_paste = st.text_area(
+                "Service Account JSON (optional if set in env/secrets)", height=140, value=""
+            )
+            sheet_id_input = _parse_sheet_id(sheet_url_or_id) if sheet_url_or_id else ""
+
+        # --- Export run ---
+        run_it = st.button(t("RUN_EXPORT"), key="run_export_btn")
+
+        if run_it:
+            try:
+                records_for_export = view if scope == t("FILTERED") else data
+                df_export = build_template_df(
+                    records_for_export, template_cols, invoice_index=invoice_index_combined
+                )
+
+                ensure_dirs()
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                prefix_clean = (fname_prefix or "export").strip()
+                prefix_clean = re.sub(r"[^\w\-]+", "_", prefix_clean)
+
+                if dest_choice == t("DEST_CSV"):
+                    # CSV ως string (UTF-8-SIG για Excel compatibility)
+                    csv_text = df_export.to_csv(index=False, encoding="utf-8-sig")
+                    if save_copy:
+                        out_path = EXPORTS_DIR / f"{prefix_clean}_{ts}.csv"
+                        with out_path.open("w", encoding="utf-8-sig", newline="") as fh_csv:
+                            fh_csv.write(csv_text)
+                        st.success(t("EXPORT_READY_CSV").format(rows=len(df_export)))
+                        st.download_button(
+                            t("DOWNLOAD_FILE"),
+                            data=csv_text,
+                            file_name=out_path.name,
+                            mime="text/csv",
+                            key="dl_csv_btn",
+                        )
+                    else:
+                        st.success(t("EXPORT_READY_CSV").format(rows=len(df_export)))
+                        st.download_button(
+                            t("DOWNLOAD_FILE"),
+                            data=csv_text,
+                            file_name=f"{prefix_clean}_{ts}.csv",
+                            mime="text/csv",
+                            key="dl_csv_btn_nofile",
+                        )
+
+                elif dest_choice == t("DEST_XLSX"):
+                    bio = BytesIO()
+                    # openpyxl/xlsxwriter χρησιμοποιείται από pandas writer ανάλογα με το env
+                    with pd.ExcelWriter(bio, engine="xlsxwriter") as writer:
+                        df_export.to_excel(writer, index=False, sheet_name="Data")
+                    bio.seek(0)
+                    xlsx_bytes = bio.getvalue()
+
+                    if save_copy:
+                        out_path = EXPORTS_DIR / f"{prefix_clean}_{ts}.xlsx"
+                        with out_path.open("wb") as fh_xlsx:
+                            fh_xlsx.write(xlsx_bytes)
+                        st.success(t("EXPORT_READY_XLSX").format(rows=len(df_export)))
+                        st.download_button(
+                            t("DOWNLOAD_FILE"),
+                            data=xlsx_bytes,
+                            file_name=out_path.name,
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="dl_xlsx_btn",
+                        )
+                    else:
+                        st.success(t("EXPORT_READY_XLSX").format(rows=len(df_export)))
+                        st.download_button(
+                            t("DOWNLOAD_FILE"),
+                            data=xlsx_bytes,
+                            file_name=f"{prefix_clean}_{ts}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="dl_xlsx_btn_nofile",
+                        )
+
+                else:  # Google Sheets
+                    # Βασικοί έλεγχοι εισόδου
+                    if not sheet_id_input:
+                        st.error(t("TARGET_SHEET") + ": required")
+                        st.stop()
+
+                    # Credentials από secrets/env/paste
+                    creds_dict, _sa_email = _detect_creds_from_sources(creds_paste)
+                    if not creds_dict:
+                        st.warning(t("NEED_CREDS"))
+                        st.stop()
+
+                    mode_norm = "replace" if mode_input == t("REPLACE") else "append"
+
+                    try:
+                        url = upload_dataframe_to_sheet(
+                            df_export,
+                            sheet_id=sheet_id_input,
+                            worksheet_name=worksheet_input or "Sheet1",
+                            creds_dict=creds_dict,  # dict[str, Any]
+                            mode=mode_norm,
+                        )
+                        st.success(
+                            t("EXPORT_READY_GS").format(
+                                ws=worksheet_input or "Sheet1", mode=mode_norm
+                            )
+                        )
+                        st.link_button(t("OPEN_IN_GSHEETS"), url)
+                    except Exception as ex:
+                        ui_error(
+                            "Google Sheets upload failed",
+                            "gsheets_upload_error",
+                            {"error": str(ex)},
+                        )
+
+            except Exception as exc:
+                ui_error("Απέτυχε το export.", "export_error", {"error": str(exc)})
+
+        # ---- Record list (labels + selectbox) ----
+        labels: list[str] = []
         try:
             for r in view:
-                tag = {"form": "FORM", "email": "EMAIL", "invoice_html": "INV"}.get(
-                    r.get("source"), r.get("source")
-                )
+                source_map: dict[str, str] = {
+                    "form": "FORM",
+                    "email": "EMAIL",
+                    "invoice_html": "INV",
+                }
+                src_val = r.get("source")
+                src_key: str = src_val if isinstance(src_val, str) else ""
+                tag = source_map.get(src_key, src_key)
+
                 title = (
                     r.get("subject")
                     or r.get("invoice_number")
@@ -1154,31 +1327,33 @@ def run_app() -> None:
                     or r.get("company")
                     or r.get("service")
                     or r.get("source_file")
-                    or r["id"]
+                    or r.get("id", "")
                 )
                 labels.append(f"[{tag}] {title}")
+
         except Exception as e:
             ui_warn("Σφάλμα κατασκευής λιστας sidebar.", "sidebar_list_error", {"error": str(e)})
+
+        if not view:
+            ui_info("Δεν βρέθηκαν εγγραφές με τα συγκεκριμένα φίλτρα.", "no_results")
+            st.stop()
 
         sel = st.selectbox(
             t("RECORD"), options=range(len(view)), format_func=lambda i: labels[i] if view else ""
         )
 
-    # -------- Record details --------
-    if not view:
-        ui_info("Δεν βρέθηκαν εγγραφές με τα συγκεκριμένα φίλτρα.", "no_results")
-        st.stop()
+        # -------- Record details --------
+        rec = view[sel]
+        idx = find_index_by_id(data, rec.get("id", ""))
+        if idx < 0:
+            ui_error(
+                "Η επιλεγμένη εγγραφή δεν βρέθηκε στα δεδομένα.",
+                "record_not_found",
+                {"id": rec.get("id")},
+            )
+            st.stop()
 
-    rec = view[sel]
-    idx = find_index_by_id(data, rec.get("id", ""))
-    if idx < 0:
-        ui_error(
-            "Η επιλεγμένη εγγραφή δεν βρέθηκε στα δεδομένα.",
-            "record_not_found",
-            {"id": rec.get("id")},
-        )
-        st.stop()
-
+    # ------- Resolve related invoice (if any) -------
     invoice_payload: dict[str, Any] | None = None
     invoice_rec_idx: int | None = None
     try:
@@ -1186,12 +1361,13 @@ def run_app() -> None:
             invoice_payload = rec
             invoice_rec_idx = idx
         elif rec.get("source") == "email":
-            inv_no = rec.get("invoice_number_in_subject") or rec.get("invoice_number")
-            if inv_no:
-                invoice_payload = invoice_index_combined.get(inv_no) or invoice_index_combined.get(
-                    _norm_invoice_no_local(inv_no)
+            inv_no_raw = rec.get("invoice_number_in_subject") or rec.get("invoice_number")
+            inv_key: str = inv_no_raw if isinstance(inv_no_raw, str) else ""
+            if inv_key:
+                invoice_payload = invoice_index_combined.get(inv_key) or invoice_index_combined.get(
+                    _norm_invoice_no_local(inv_key)
                 )
-                invoice_rec_idx = find_invoice_record_index_by_number(data, inv_no)
+                invoice_rec_idx = find_invoice_record_index_by_number(data, inv_key)
     except Exception as e:
         ui_warn(
             "Σφάλμα αντιστοίχισης email → invoice.",
@@ -1228,7 +1404,7 @@ def run_app() -> None:
     with col2:
         st.subheader(t("ACTIONS"))
         try:
-            st.write(f"**{t('STATUS')}:** {status_to_label(rec.get('status','pending'))}")
+            st.write(f"**{t('STATUS')}:** {status_to_label(rec.get('status', 'pending'))}")
             status_options_labels = [status_to_label(s) for s in ALLOWED_STATUS]
             current_label = status_to_label(rec.get("status", "pending"))
             new_status_label = st.selectbox(
@@ -1412,7 +1588,7 @@ def run_app() -> None:
                     pretty_on = st.checkbox(
                         t("READABILITY_FORMAT"),
                         value=True,
-                        key=f"pretty_email_ck_{rec.get('id','')}",
+                        key=f"pretty_email_ck_{rec.get('id', '')}",
                     )
                     body_raw = rec.get("body", "")
                     body_show = pretty_email_body(body_raw) if pretty_on else body_raw
@@ -1421,7 +1597,7 @@ def run_app() -> None:
                         t("MESSAGE_BODY"),
                         value=body_show,
                         height=300,
-                        key=f"email_body_{rec.get('id','')}",
+                        key=f"email_body_{rec.get('id', '')}",
                     )
             except Exception as e:
                 ui_warn(
@@ -1430,7 +1606,7 @@ def run_app() -> None:
                     {"error": str(e)},
                 )
 
-        # Τιμολόγιο – parsed + editors
+        # -------- Τιμολόγιο – parsed στοιχεία (headers/metrics) --------
         if invoice_payload:
             st.markdown("### Στοιχεία Τιμολογίου (parsed)")
             try:
@@ -1438,19 +1614,19 @@ def run_app() -> None:
                 with c1:
                     st.markdown(f"**{t('SELLER')}**")
                     st.write(
-                        f"- {t('SELLER_NAME')}: {invoice_payload.get('seller_name','')}\n"
-                        f"- {t('SELLER_EMAIL')}: {invoice_payload.get('seller_email','')}\n"
-                        f"- {t('SELLER_PHONE')}: {invoice_payload.get('seller_phone','')}\n"
-                        f"- {t('SELLER_VAT')}: {invoice_payload.get('seller_vat','')}\n"
-                        f"- {t('SELLER_TAX_OFFICE')}: {invoice_payload.get('seller_tax_office','')}\n"
-                        f"- {t('SELLER_ADDRESS')}: {invoice_payload.get('seller_address','')}"
+                        f"- {t('SELLER_NAME')}: {invoice_payload.get('seller_name', '')}\n"
+                        f"- {t('SELLER_EMAIL')}: {invoice_payload.get('seller_email', '')}\n"
+                        f"- {t('SELLER_PHONE')}: {invoice_payload.get('seller_phone', '')}\n"
+                        f"- {t('SELLER_VAT')}: {invoice_payload.get('seller_vat', '')}\n"
+                        f"- {t('SELLER_TAX_OFFICE')}: {invoice_payload.get('seller_tax_office', '')}\n"
+                        f"- {t('SELLER_ADDRESS')}: {invoice_payload.get('seller_address', '')}"
                     )
                 with c2:
                     st.markdown(f"**{t('BUYER')}**")
                     st.write(
-                        f"- {t('BUYER_NAME')}: {invoice_payload.get('buyer_name','')}\n"
-                        f"- {t('BUYER_VAT')}: {invoice_payload.get('buyer_vat','')}\n"
-                        f"- {t('BUYER_ADDRESS')}: {invoice_payload.get('buyer_address','')}"
+                        f"- {t('BUYER_NAME')}: {invoice_payload.get('buyer_name', '')}\n"
+                        f"- {t('BUYER_VAT')}: {invoice_payload.get('buyer_vat', '')}\n"
+                        f"- {t('BUYER_ADDRESS')}: {invoice_payload.get('buyer_address', '')}"
                     )
             except Exception as e:
                 ui_warn(
@@ -1460,12 +1636,12 @@ def run_app() -> None:
                 )
 
             try:
-                c3, c4, c5 = st.columns(3)
-                with c3:
+                m1, m2, m3 = st.columns(3)
+                with m1:
                     st.metric(t("INVOICE_NUMBER"), invoice_payload.get("invoice_number", ""))
-                with c4:
+                with m2:
                     st.metric(t("DATE"), invoice_payload.get("date", ""))
-                with c5:
+                with m3:
                     st.metric(t("PAYMENT_METHOD"), invoice_payload.get("payment_method", ""))
             except Exception as e:
                 ui_warn(
@@ -1474,10 +1650,13 @@ def run_app() -> None:
                     {"error": str(e)},
                 )
 
+            # (continues in Part 5: items editor, summary, meta editor, preview HTML, raw JSON)
+
+            # -------- Items editor --------
             with st.expander(t("ITEM_LINES"), expanded=False):
                 try:
                     items = invoice_payload.get("items", []) or []
-                    editable_rows = []
+                    editable_rows: list[dict[str, Any]] = []
                     for it in items:
                         qty = it.get("quantity")
                         price = it.get("unit_price")
@@ -1502,9 +1681,9 @@ def run_app() -> None:
                         )
 
                     editor_key = f"items_editor_{invoice_payload.get('id') or rec.get('id') or idx}"
-                    df = pd.DataFrame(editable_rows)
+                    df_items = pd.DataFrame(editable_rows)
                     edited_df = st.data_editor(
-                        df,
+                        df_items,
                         num_rows="dynamic",
                         key=editor_key,
                         use_container_width=True,
@@ -1541,7 +1720,7 @@ def run_app() -> None:
                     )
 
                     subtotal_calc = 0.0
-                    cleaned_items = []
+                    cleaned_items: list[dict[str, Any]] = []
                     rows_iter = edited_df.to_dict("records") if edited_df is not None else []
                     for row in rows_iter:
                         try:
@@ -1569,10 +1748,10 @@ def run_app() -> None:
                     vat_amount_calc = round(subtotal_calc * (vat_rate_input / 100.0), 2)
                     total_calc = round(subtotal_calc + vat_amount_calc, 2)
 
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric(t("NET_CALC"), f"{subtotal_calc:.2f}")
-                    c2.metric(t("VAT_CALC"), f"{vat_amount_calc:.2f} ({vat_rate_input:.2f}%)")
-                    c3.metric(t("TOTAL_CALC"), f"{total_calc:.2f}")
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric(t("NET_CALC"), f"{subtotal_calc:.2f}")
+                    m2.metric(t("VAT_CALC"), f"{vat_amount_calc:.2f} ({vat_rate_input:.2f}%)")
+                    m3.metric(t("TOTAL_CALC"), f"{total_calc:.2f}")
 
                     if st.button(t("SAVE_ITEMS_CALC"), key="save_items_btn"):
                         try:
@@ -1611,18 +1790,23 @@ def run_app() -> None:
                         {"error": str(e)},
                     )
 
+            # -------- Summary --------
             try:
                 st.markdown(f"**{t('SUMMARY')}**")
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric(t("NET"), f"{invoice_payload.get('subtotal', '')}")
                 vat_val = invoice_payload.get("vat_amount", "")
-                vat_rate = invoice_payload.get("vat_rate", "")
-                c2.metric(t("VAT"), f"{vat_val} ({vat_rate}%)" if vat_rate != "" else f"{vat_val}")
+                vat_rate_val = invoice_payload.get("vat_rate", "")
+                c2.metric(
+                    t("VAT"),
+                    f"{vat_val} ({vat_rate_val}%)" if vat_rate_val != "" else f"{vat_val}",
+                )
                 c3.metric(t("TOTAL"), f"{invoice_payload.get('total', '')}")
                 c4.metric(t("CURRENCY"), invoice_payload.get("currency", ""))
             except Exception as e:
                 ui_warn("Αποτυχία εμφάνισης σύνοψης.", "summary_view_error", {"error": str(e)})
 
+            # -------- Invoice meta editor --------
             with st.expander(t("INVOICE_META_EDITOR"), expanded=False):
                 try:
                     seller_name = st.text_input(
@@ -1638,8 +1822,7 @@ def run_app() -> None:
                         t("SELLER_VAT"), value=invoice_payload.get("seller_vat", "")
                     )
                     seller_tax_office = st.text_input(
-                        t("SELLER_TAX_OFFICE"),
-                        value=invoice_payload.get("seller_tax_office", ""),
+                        t("SELLER_TAX_OFFICE"), value=invoice_payload.get("seller_tax_office", "")
                     )
                     seller_address = st.text_input(
                         t("SELLER_ADDRESS"), value=invoice_payload.get("seller_address", "")
@@ -1700,7 +1883,7 @@ def run_app() -> None:
                         {"error": str(e)},
                     )
 
-        # Προεπισκόπηση HTML τιμολογίου (στο col1)
+        # -------- Προεπισκόπηση HTML τιμολογίου --------
         if preview_html:
             try:
                 with st.expander(html_title or t("INVOICE_PREVIEW"), expanded=False):
@@ -1727,7 +1910,7 @@ def run_app() -> None:
                     {"error": str(e)},
                 )
 
-        # Το RAW JSON πιο χαμηλά σε expander
+        # -------- RAW JSON --------
         with st.expander(t("RECORD_DETAILS"), expanded=False):
             try:
                 st.json(rec, expanded=False)

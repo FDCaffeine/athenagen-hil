@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from bs4 import BeautifulSoup
+from bs4.element import Tag
 
 
 # ---------- choose best parser ----------
@@ -27,11 +28,11 @@ _PARSER = _pick_parser()
 WS = re.compile(r"\s+")
 
 
-def _nw(s: str | None) -> str:
+def _nw(s: Any) -> str:
     return WS.sub(" ", (s or "")).strip()
 
 
-def _norm_amount(tok: str) -> str:
+def _norm_amount(tok: str | None) -> str:
     if tok is None:
         return ""
     t = re.sub(r"[^\d,.\-]", "", tok.strip())
@@ -45,7 +46,8 @@ def _norm_amount(tok: str) -> str:
 
 def _to_float(tok: str | None) -> float | None:
     try:
-        return float(_norm_amount(tok))
+        txt = _norm_amount(tok)
+        return float(txt) if txt != "" else None
     except Exception:
         return None
 
@@ -55,7 +57,7 @@ DATE_PAT = re.compile(
 )
 
 
-def _parse_date_text(text: str) -> str:
+def _parse_date_text(text: str | None) -> str:
     m = DATE_PAT.search(text or "")
     if not m:
         return ""
@@ -85,14 +87,16 @@ def _find_invoice_number_from_text(text: str) -> str:
     return ""
 
 
-def _find_summary_table(soup: BeautifulSoup):
+def _find_summary_table(soup: BeautifulSoup) -> Tag | None:
     div_sum = soup.select_one("div.summary")
-    if div_sum:
+    if isinstance(div_sum, Tag):
         tbl = div_sum.find("table")
-        if tbl:
+        if isinstance(tbl, Tag):
             return tbl
     for tbl in soup.find_all("table"):
-        if tbl.find(string=re.compile(r"καθαρή\s*αξία|subtotal|net\s*(amount|value)", re.I)):
+        if isinstance(tbl, Tag) and tbl.find(
+            string=re.compile(r"καθαρή\s*αξία|subtotal|net\s*(amount|value)", re.I)
+        ):
             return tbl
     return None
 
@@ -100,10 +104,14 @@ def _find_summary_table(soup: BeautifulSoup):
 def _extract_summary_amounts(
     soup: BeautifulSoup,
 ) -> tuple[float | None, float | None, float | None, float | None, str]:
-    subtotal = vat_amount = vat_rate = total = None
+    subtotal: float | None = None
+    vat_amount: float | None = None
+    vat_rate: float | None = None
+    total: float | None = None
     currency = "EUR"
+
     tbl = _find_summary_table(soup)
-    if not tbl:
+    if not isinstance(tbl, Tag):
         return subtotal, vat_amount, vat_rate, total, currency
 
     whole_text = _nw(tbl.get_text(" "))
@@ -115,6 +123,8 @@ def _extract_summary_amounts(
         currency = "GBP"
 
     for tr in tbl.find_all("tr"):
+        if not isinstance(tr, Tag):
+            continue
         tds = tr.find_all(["td", "th"])
         if len(tds) < 2:
             continue
@@ -154,7 +164,7 @@ EMAIL_RE = re.compile(r"Email\s*:\s*([^\s|]+)", re.I)
 
 
 def _extract_seller_block(soup: BeautifulSoup) -> dict[str, Any]:
-    out = {
+    out: dict[str, Any] = {
         "seller_name": "",
         "seller_email": "",
         "seller_phone": "",
@@ -163,13 +173,13 @@ def _extract_seller_block(soup: BeautifulSoup) -> dict[str, Any]:
         "seller_address": "",
     }
     header = soup.select_one(".header")
-    if not header:
+    if not isinstance(header, Tag):
         return out
     company = header.select_one(".company")
-    if company:
+    if isinstance(company, Tag):
         out["seller_name"] = _nw(company.get_text())
     divs = header.find_all("div")
-    txts = [_nw(d.get_text(" ")) for d in divs]
+    txts = [_nw(d.get_text(" ")) for d in divs if isinstance(d, Tag)]
     # address line: first non meta after name
     for t in txts:
         if t == out["seller_name"]:
@@ -191,42 +201,46 @@ def _extract_seller_block(soup: BeautifulSoup) -> dict[str, Any]:
     return out
 
 
-def _get_details_wrapper(details: BeautifulSoup):
-    if not details:
+def _get_details_wrapper(details: Tag | None) -> Tag | None:
+    if not isinstance(details, Tag):
         return None
     for child in details.find_all("div", recursive=False):
-        style = (child.get("style") or "").lower()
+        if not isinstance(child, Tag):
+            continue
+        style = (_nw(child.get("style"))).lower()
         if "display" in style and "flex" in style:
             return child
     for child in details.find_all("div"):
-        style = (child.get("style") or "").lower()
+        if not isinstance(child, Tag):
+            continue
+        style = (_nw(child.get("style"))).lower()
         if "display" in style and "flex" in style:
             return child
     return None
 
 
-def _extract_header_left_block(details: BeautifulSoup) -> str:
-    if not details:
+def _extract_header_left_block(details: Tag | None) -> str:
+    if not isinstance(details, Tag):
         return ""
     wrapper = _get_details_wrapper(details)
-    if not wrapper:
+    if not isinstance(wrapper, Tag):
         return ""
-    cols = wrapper.find_all("div", recursive=False)
+    cols = [c for c in wrapper.find_all("div", recursive=False) if isinstance(c, Tag)]
     left = cols[0] if cols else None
-    return _nw(left.get_text(" ")) if left else ""
+    return _nw(left.get_text(" ")) if isinstance(left, Tag) else ""
 
 
 def _extract_buyer_block(soup: BeautifulSoup) -> dict[str, Any]:
     out: dict[str, Any] = {"buyer_name": "", "buyer_vat": "", "buyer_address": ""}
     details = soup.select_one(".invoice-details")
-    if not details:
+    if not isinstance(details, Tag):
         return out
     wrapper = _get_details_wrapper(details)
-    if not wrapper:
+    if not isinstance(wrapper, Tag):
         return out
-    cols = wrapper.find_all("div", recursive=False)
+    cols = [c for c in wrapper.find_all("div", recursive=False) if isinstance(c, Tag)]
     right = cols[1] if len(cols) >= 2 else None
-    if not right:
+    if not isinstance(right, Tag):
         return out
     raw = right.get_text("\n")
     lines = [line.strip() for line in raw.splitlines() if line.strip()]
@@ -241,7 +255,7 @@ def _extract_buyer_block(soup: BeautifulSoup) -> dict[str, Any]:
             vat = m.group(1)
             break
     out["buyer_vat"] = vat
-    addr_parts = []
+    addr_parts: list[str] = []
     for line in lines[1:]:
         if VAT_RE.search(line):
             break
@@ -262,25 +276,35 @@ def _extract_payment_and_date(details_text: str) -> tuple[str, str]:
 def _extract_items(soup: BeautifulSoup) -> tuple[list[dict[str, Any]], str]:
     items: list[dict[str, Any]] = []
     currency = "EUR"
+
     tbl = soup.select_one("table.invoice-table")
-    if not tbl:
+    if not isinstance(tbl, Tag):
         return items, currency
-    tbody = tbl.find("tbody") or tbl
-    for tr in tbody.find_all("tr"):
-        tds = tr.find_all("td")
+
+    # Αποφεύγουμε το: tbody = tbl.find("tbody") or tbl  (προκαλεί union PageElement | Tag)
+    tbody = tbl.find("tbody")
+    rows_parent: Tag = tbody if isinstance(tbody, Tag) else tbl
+
+    for tr in rows_parent.find_all("tr"):
+        if not isinstance(tr, Tag):
+            continue
+        tds = [td for td in tr.find_all("td") if isinstance(td, Tag)]
         if len(tds) < 4:
             continue
+
         desc = _nw(tds[0].get_text(" "))
         qty = _to_float(_nw(tds[1].get_text(" ")))
         unit = _nw(tds[2].get_text(" "))
         total = _nw(tds[3].get_text(" "))
-        sym_text = " ".join([unit, total])
+
+        sym_text = f"{unit} {total}"
         if "€" in sym_text:
             currency = "EUR"
         elif "$" in sym_text:
             currency = "USD"
         elif "£" in sym_text:
             currency = "GBP"
+
         items.append(
             {
                 "description": desc,
@@ -290,6 +314,7 @@ def _extract_items(soup: BeautifulSoup) -> tuple[list[dict[str, Any]], str]:
                 "currency": currency,
             }
         )
+
     return items, currency
 
 
@@ -302,17 +327,20 @@ def _extract_footer_notes(soup: BeautifulSoup) -> list[dict[str, str]]:
     """
     notes: list[dict[str, str]] = []
     summary_div = soup.select_one("div.summary")
-    start = summary_div.find_next("div") if summary_div else None
-    if not start:
-        start = soup.find("div", attrs={"style": re.compile(r"font-size\s*:\s*12px", re.I)})
-    container = start or soup
-    for p in container.find_all("p"):
+
+    start = summary_div.find_next("div") if isinstance(summary_div, Tag) else None
+    # Επιλέγουμε ρητά τη ρίζα για το scan (αποφεύγουμε union τύπο που μπερδεύει mypy)
+    p_nodes = start.find_all("p") if isinstance(start, Tag) else soup.find_all("p")
+
+    for p in p_nodes:
+        if not isinstance(p, Tag):
+            continue
         txt = _nw(p.get_text(" "))
         if not txt:
             continue
         label = ""
         strong = p.find(["strong", "b"])
-        if strong:
+        if isinstance(strong, Tag):
             label = _nw(strong.get_text()).rstrip(":：").strip()
             full = _nw(p.get_text(" "))
             patt = re.compile(rf"^{re.escape(label)}\s*[:：]?\s*", re.I)
@@ -336,7 +364,7 @@ def _parse_invoice_soup(soup: BeautifulSoup) -> dict[str, Any]:
     seller = _extract_seller_block(soup)
 
     details = soup.select_one(".invoice-details")
-    left_text = _extract_header_left_block(details) if details else ""
+    left_text = _extract_header_left_block(details if isinstance(details, Tag) else None)
     date_str, payment_method = _extract_payment_and_date(left_text)
     if not date_str:
         date_str = _parse_date_text(full_text)

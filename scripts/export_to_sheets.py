@@ -206,7 +206,7 @@ def build_template_df(records: list[dict[str, Any]], template_cols: list[str]) -
                 try:
                     message = " | ".join(
                         [
-                            f"{(n or {}).get('label','')}: {(n or {}).get('value','')}".strip(
+                            f"{(n or {}).get('label', '')}: {(n or {}).get('value', '')}".strip(
                                 ": "
                             ).strip()
                             for n in notes

@@ -42,9 +42,7 @@ def ensure_combined_feed():
     )
     if proc.returncode != 0:
         raise RuntimeError(
-            f"main.py failed (code {proc.returncode}).\n"
-            f"STDOUT:\n{proc.stdout}\n"
-            f"STDERR:\n{proc.stderr}"
+            f"main.py failed (code {proc.returncode}).\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
         )
 
 

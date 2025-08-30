@@ -1,4 +1,6 @@
 # main.py
+from __future__ import annotations
+
 import argparse
 import json
 import logging
@@ -11,9 +13,12 @@ from typing import Any
 
 # --- make stdout/stderr UTF-8 safe on Windows ---
 try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
+    # best effort; fall back silently
     pass
 
 # Local imports
@@ -27,7 +32,7 @@ EMAILS_FOLDER_DEF = "dummy_data/emails"
 INVOICES_FOLDER_DEF = "dummy_data/invoices"
 OUT_DIR_DEF = "outputs"
 
-ALLOWED_STATUS = ["pending", "approved", "rejected", "edited"]
+ALLOWED_STATUS: list[str] = ["pending", "approved", "rejected", "edited"]
 
 # ----------------- Logging -----------------
 LOGGER = logging.getLogger("athenagen")
@@ -85,24 +90,24 @@ def backup_existing(path: str, backup_dir: str, enable_backup: bool = True) -> N
         with open(path, encoding="utf-8") as fsrc, open(dst, "w", encoding="utf-8") as fdst:
             fdst.write(fsrc.read())
         LOGGER.info(f"[Backup] {dst}")
-    except Exception as e:
-        LOGGER.warning(f"Backup failed for {path}: {e}")
+    except Exception as exc:
+        LOGGER.warning(f"Backup failed for {path}: {exc}")
 
 
 def safe_dump(obj: Any, path: str, backup_dir: str, enable_backup: bool = True) -> None:
     backup_existing(path, backup_dir, enable_backup)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(obj, f, indent=2, ensure_ascii=False)
+    with open(path, "w", encoding="utf-8") as fh_out:
+        json.dump(obj, fh_out, indent=2, ensure_ascii=False)
     LOGGER.info(f"[Wrote] {path}")
 
 
-INV_RE = re.compile(
+INV_RE: re.Pattern[str] = re.compile(
     r"(?:invoice|τιμολ(?:όγιο|\.?)|αρ\.?\s*τιμολ(?:ογίου)?)\s*(?:no\.?|#|nr\.?|:)?\s*([A-Z]{0,4}[-/]?\d[\w\-\/]+)",
     re.IGNORECASE,
 )
 
 
-def extract_inv_no(txt: str) -> str | None:
+def extract_inv_no(txt: str | None) -> str | None:
     if not txt:
         return None
     m = INV_RE.search(txt)
@@ -110,10 +115,10 @@ def extract_inv_no(txt: str) -> str | None:
 
 
 def _force_status(status: Any) -> str:
-    return status if status in ALLOWED_STATUS else "pending"
+    return status if isinstance(status, str) and status in ALLOWED_STATUS else "pending"
 
 
-def normalize_common(rec: dict, source: str) -> dict:
+def normalize_common(rec: dict[str, Any], source: str) -> dict[str, Any]:
     """
     Ενοποιεί κοινά πεδία και ΕΓΓΥΑΤΑΙ ότι θα υπάρχει έγκυρο:
       - source
@@ -123,16 +128,21 @@ def normalize_common(rec: dict, source: str) -> dict:
       - schema_version
       - needs_action
     """
-    r = dict(rec)
+    r: dict[str, Any] = dict(rec)
     r["source"] = source
     r["status"] = _force_status(r.get("status"))
-    # πολύ αυστηρό: αν δεν υπάρχει ή είναι "κενό/ψευδές", φτιάξτο
     if not r.get("id"):
         r["id"] = make_id(source)
     r.setdefault("created_at", now_iso())
     r.setdefault("schema_version", "1.0")
     r.setdefault("needs_action", False)
     return r
+
+
+def _norm_inv_local(s: str | None) -> str:
+    if not s:
+        return ""
+    return "".join(ch for ch in str(s).upper() if ch.isalnum())
 
 
 # ----------------- Core -----------------
@@ -143,8 +153,9 @@ def run_pipeline(
     out_dir: str,
     enable_backup: bool = True,
     dry_run: bool = False,
-) -> dict:
+) -> dict[str, Any]:
     """
+    Run parsers, enrich emails, normalize and write outputs.
     Returns a summary dict with counts and totals.
     """
     backup_dir = ensure_dirs(out_dir)
@@ -158,20 +169,20 @@ def run_pipeline(
     # 1) Parse safely
     try:
         forms = parse_all_forms(forms_dir)
-    except Exception as e:
-        LOGGER.error(f"parse_all_forms: {e}")
+    except Exception as exc:
+        LOGGER.error(f"parse_all_forms: {exc}")
         forms = []
 
     try:
         emails = parse_all_emails(emails_dir)
-    except Exception as e:
-        LOGGER.error(f"parse_all_emails: {e}")
+    except Exception as exc:
+        LOGGER.error(f"parse_all_emails: {exc}")
         emails = []
 
     try:
         invoices = parse_all_invoices(invoices_dir)
-    except Exception as e:
-        LOGGER.error(f"parse_all_invoices: {e}")
+    except Exception as exc:
+        LOGGER.error(f"parse_all_invoices: {exc}")
         invoices = []
 
     if not dry_run:
@@ -181,17 +192,25 @@ def run_pipeline(
     else:
         LOGGER.info("[Dry-run] Skipped writing parsed_* files")
 
-    # 2) Index invoices by number
-    inv_by_no = {
-        (r.get("invoice_number") or "").strip(): r for r in invoices if r.get("invoice_number")
+    # 2) Index invoices by number (raw + normalized)
+    inv_by_no_raw: dict[str, dict[str, Any]] = {
+        (str(r.get("invoice_number")).strip()): r for r in invoices if r.get("invoice_number")
     }
+    inv_by_no_norm: dict[str, dict[str, Any]] = {
+        _norm_inv_local(r.get("invoice_number")): r for r in invoices if r.get("invoice_number")
+    }
+    # raw keys override normalized keys for readability (same όπως στο app.py)
+    inv_by_no: dict[str, dict[str, Any]] = {**inv_by_no_norm, **inv_by_no_raw}
 
     # 3) Enrich emails (match από subject ΚΑΙ body)
-    enriched_emails = []
+    enriched_emails: list[dict[str, Any]] = []
     for e in emails:
         inv_no = extract_inv_no(e.get("subject", "")) or extract_inv_no(e.get("body", ""))
-        linked = inv_by_no.get(inv_no) if inv_no else None
-        enriched = {
+        linked = None
+        if inv_no:
+            linked = inv_by_no.get(inv_no) or inv_by_no.get(_norm_inv_local(inv_no))
+
+        enriched: dict[str, Any] = {
             **e,
             "invoice_number_in_subject": inv_no,
             "matched_invoice_html": bool(linked),
@@ -205,7 +224,7 @@ def run_pipeline(
             or not enriched.get("has_pdf_attachments")
             or not enriched.get("matched_invoice_html")
         )
-        enriched["needs_action"] = needs
+        enriched["needs_action"] = bool(needs)
 
         enriched_emails.append(enriched)
 
@@ -215,7 +234,7 @@ def run_pipeline(
         LOGGER.info("[Dry-run] Skipped writing parsed_emails_enriched.json")
 
     # 4) Normalize & combine
-    out = (
+    out: list[dict[str, Any]] = (
         [normalize_common(r, "form") for r in forms]
         + [normalize_common(r, "email") for r in enriched_emails]
         + [normalize_common(r, "invoice_html") for r in invoices]
@@ -239,13 +258,15 @@ def run_pipeline(
         LOGGER.info("[Dry-run] Skipped writing combined_feed.json")
 
     # Summary
-    inv_total = round(sum((r.get("total") or 0) for r in invoices), 2)
+    try:
+        inv_total = round(sum(float(r.get("total") or 0) for r in invoices), 2)
+    except Exception:
+        inv_total = 0.0
     matched_cnt = sum(1 for e in enriched_emails if e.get("matched_invoice_html"))
 
     LOGGER.info(f"Outputs in '{out_dir}'")
     LOGGER.info(
-        f"Forms: {len(forms)} | Emails: {len(emails)} | "
-        f"Invoices: {len(invoices)} | Combined: {len(out)}"
+        f"Forms: {len(forms)} | Emails: {len(emails)} | Invoices: {len(invoices)} | Combined: {len(out)}"
     )
     LOGGER.info(f"Invoice TOTAL: €{inv_total} | Matched email↔invoice: {matched_cnt}")
     LOGGER.info("Tip: streamlit run app.py")
@@ -262,7 +283,7 @@ def run_pipeline(
 
 
 # ----------------- CLI -----------------
-def parse_args(argv=None):
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="AthenaGen – Parse & combine inputs into outputs/combined_feed.json"
     )
@@ -278,7 +299,7 @@ def parse_args(argv=None):
     return p.parse_args(argv)
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     setup_logger(args.out, verbose=args.verbose)
 

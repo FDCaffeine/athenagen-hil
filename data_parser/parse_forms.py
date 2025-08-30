@@ -1,9 +1,12 @@
 # data_parser/parse_forms.py
+from __future__ import annotations
+
 import os
 import re
 from typing import Any
 
 from bs4 import BeautifulSoup
+from bs4.element import Tag
 
 
 def _pick_parser() -> str:
@@ -13,7 +16,6 @@ def _pick_parser() -> str:
     """
     for candidate in ("lxml", "html5lib", "html.parser"):
         try:
-            # Πρόχειρο smoke-test: απλά φτιάξε έναν κενό soup με τον parser
             BeautifulSoup("<div></div>", candidate)
             return candidate
         except Exception:
@@ -24,6 +26,15 @@ def _pick_parser() -> str:
 _PARSER = _pick_parser()
 
 
+def _as_str(v: Any) -> str:
+    if v is None:
+        return ""
+    # ενιαίο isinstance, σβήνει το SIM101. Το noqa: UP038 σιωπά το hint για union (δεν το θέλουμε εδώ).
+    if isinstance(v, (list, tuple)):  # noqa: UP038
+        return " ".join(map(str, v))
+    return str(v)
+
+
 def _normalize_phone(phone: str | None) -> str | None:
     """Καθαρίζει αριθμούς τηλεφώνου (κρατάει μόνο ψηφία και '+')."""
     if not phone:
@@ -31,28 +42,31 @@ def _normalize_phone(phone: str | None) -> str | None:
     return re.sub(r"[^\d+]", "", phone)
 
 
-def _get_input_value(soup: BeautifulSoup, name: str):
+def _get_input_value(soup: BeautifulSoup, name: str) -> str | None:
     """Επιστρέφει την τιμή ενός input/select/textarea με συγκεκριμένο name."""
     el = soup.find(attrs={"name": name})
-    if not el:
+    if not isinstance(el, Tag):
         return None
 
     # textarea -> text
     if el.name == "textarea":
-        return (el.text or "").strip()
+        val = (el.text or "").strip()
+        return val or None
 
     # select -> selected option value ή κείμενο
     if el.name == "select":
         opt = el.find("option", selected=True) or el.find("option")
-        if not opt:
+        if not isinstance(opt, Tag):
             return None
-        return (opt.get("value") or opt.text or "").strip()
+        val = _as_str(opt.get("value") or opt.text).strip()
+        return val or None
 
-    # input -> value attribute
-    return (el.get("value") or "").strip()
+    # input -> value attribute (πιθανόν AttributeValueList)
+    val = _as_str(el.get("value")).strip()
+    return val or None
 
 
-def parse_form(html_content: str) -> dict:
+def parse_form(html_content: str) -> dict[str, Any]:
     """Παίρνει HTML φόρμας και επιστρέφει dict με τα βασικά πεδία."""
     soup = BeautifulSoup(html_content, _PARSER)
 
@@ -82,9 +96,9 @@ def parse_form(html_content: str) -> dict:
 def parse_all_forms(forms_dir: str) -> list[dict[str, Any]]:
     """Διαβάζει όλα τα HTML αρχεία φόρμας από τον φάκελο και τα επιστρέφει ως λίστα dicts."""
     extracted: list[dict[str, Any]] = []
-    for filename in os.listdir(forms_dir):  # <-- forms_dir
+    for filename in os.listdir(forms_dir):
         if filename.lower().endswith(".html"):
-            full_path = os.path.join(forms_dir, filename)  # <-- forms_dir
+            full_path = os.path.join(forms_dir, filename)
             with open(full_path, encoding="utf-8", errors="ignore") as f:
                 data = parse_form(f.read())
             data["source_file"] = filename
