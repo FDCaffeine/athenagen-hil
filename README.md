@@ -230,4 +230,7 @@ athenagen-hil/
 
 * τι κάνατε βήμα-βήμα,
 * ποιο μήνυμα/σφάλμα εμφανίστηκε.
+<<<<<<< HEAD
 
+=======
+>>>>>>> 3c61e3d (chore: fix EOF newline in README (pre-commit end-of-file-fixer))
