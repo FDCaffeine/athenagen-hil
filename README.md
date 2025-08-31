@@ -1,131 +1,149 @@
-# AthenaGen – Human-in-the-Loop Review (HIL)
+τέλειο — ορίστε το README ανανεωμένο, **με ενότητα screenshots**. Μπορείς να το αντικαταστήσεις ως `README.md` στο repo.
 
-## 🚀 Quick Start
+---
+
+# AthenaGen — Human-in-the-Loop (HIL)
+
+Η AthenaGen είναι μια εφαρμογή **Streamlit** που ενώνει δεδομένα από **φόρμες**, **emails** και **τιμολόγια (HTML)** σε μία οθόνη.
+Σκοπός της είναι ο γρήγορος **έλεγχος**, η **διόρθωση** και η **έγκριση/απόρριψη** εγγραφών, καθώς και η **εξαγωγή** καθαρών δεδομένων σε **CSV/Excel**.
+
+> Δεν απαιτείται τεχνική γνώση. Η εφαρμογή ανοίγει στο browser και όλα γίνονται από ένα απλό UI.
+
+---
+
+## 🔎 Τι μπορείτε να κάνετε
+
+* Φιλτράρετε & αναζητήστε εγγραφές (ανά **πηγή** και **κατάσταση**).
+* Προβάλετε **emails** σε ευανάγνωστη μορφή.
+* Ελέγξτε **τιμολόγια**: στοιχεία πωλητή/πελάτη, ημερομηνία, σύνολα, ΦΠΑ κ.ά.
+* Κάντε **διορθώσεις** στα πεδία και στις **γραμμές τιμολογίου** με **αυτόματους υπολογισμούς**.
+* Σημειώστε **Notes** ανά εγγραφή.
+* **Εγκρίνετε** ή **απορρίψτε** με ένα κλικ.
+* Εξάγετε τα δεδομένα σε **CSV** (UTF-8-BOM) ή **Excel** — προαιρετικά με **δικό σας template κεφαλίδας**.
+
+---
+
+## 💻 Προαπαιτούμενα
+
+* **Windows / macOS / Linux**
+* **Python 3.11+**
+* Ένας σύγχρονος **browser** (Chrome/Edge/Firefox/Safari)
+
+---
+
+## 🚀 Γρήγορη εκκίνηση
+
+### Επιλογή 1 — Windows (εύκολος τρόπος)
+
+1. Κάντε **διπλό κλικ** στο `run.bat`.
+2. Θα ανοίξει ο browser στο **[http://localhost:8501](http://localhost:8501)**.
+
+> Την πρώτη φορά ενδέχεται να πάρει λίγο χρόνο (κατεβάζει πακέτα).
+
+### Επιλογή 2 — Χειροκίνητα (όλα τα OS)
 
 ```bash
-# 1. Δημιουργία virtual environment
+# 1) Δημιουργία & ενεργοποίηση περιβάλλοντος
 python -m venv .venv
 # Windows
 .venv\Scripts\activate
 # macOS / Linux
 source .venv/bin/activate
 
-# 2. Εγκατάσταση πακέτων
+# 2) Εγκατάσταση πακέτων
 pip install -r requirements.txt
 
-# 3. Εκκίνηση UI
+# 3) Εκκίνηση UI
 streamlit run app.py
 ```
 
-💡 Σε Windows μπορείς απλά να κάνεις **διπλό κλικ στο `run.bat`** για αυτόματη εκκίνηση.
+---
+
+## 🧭 Βασική χρήση (βήμα-βήμα)
+
+1. **Rebuild feed** (αριστερά στο sidebar)
+   Γεμίζει/φρεσκάρει τη λίστα με τις εγγραφές από φόρμες, emails και τιμολόγια.
+
+2. **Φιλτράρισμα**
+
+   * **Source**: form / email / invoice\_html
+   * **Status**: pending / approved / rejected / edited
+   * **Needs action only**: δείχνει μόνο όσα απαιτούν ενέργεια
+   * **Αναζήτηση**: λέξεις-κλειδιά
+
+3. **Επιλογή εγγραφής** (πάνω στο κυρίως πάνελ)
+   Θα δείτε τα πεδία και τα περιεχόμενα (π.χ. σώμα email ή ανάλυση τιμολογίου).
+
+4. **Έλεγχος & διορθώσεις**
+
+   * Επεξεργαστείτε πεδία (όνομα, email, τηλέφωνο, εταιρεία, κ.λπ.).
+   * Για **τιμολόγια**, αλλάξτε **ποσότητες**/**τιμές** και πατήστε **Save items & totals**.
+     Οι υπολογισμοί (subtotal/ΦΠΑ/σύνολο) γίνονται αυτόματα.
+
+5. **Σημειώσεις & απόφαση**
+
+   * Συμπληρώστε **Notes** (προαιρετικά).
+   * Πατήστε **Approve** ή **Reject**.
+
+6. **Εξαγωγή** (όταν είστε έτοιμοι)
+
+   * Από το **Export** στο sidebar:
+
+     * **Scope**: *Filtered* (μόνο όσα βλέπετε) ή *All*.
+     * **Format**: CSV ή Excel.
+     * **Template κεφαλίδας** (προαιρετικό): δώστε CSV με **μόνο την 1η γραμμή** (ονόματα στηλών) για να φτιαχτεί export με τους τίτλους που χρειάζεστε.
 
 ---
 
-## 📄 Περιγραφή
+## 📤 Εξαγωγές αναλυτικά
 
-Εφαρμογή **Streamlit** για ενοποίηση, οπτικοποίηση και επαλήθευση δεδομένων από **φόρμες**, **emails** και **τιμολόγια HTML**, με δυνατότητα διόρθωσης και εξαγωγής βάσει προκαθορισμένου CSV template.
+* **CSV**: UTF-8-SIG ώστε να ανοίγει σωστά στο Excel.
+* **Excel (XLSX)**: οι εγγραφές μπαίνουν στο φύλλο **Data**.
+* **Template κεφαλίδας** (προαιρετικό):
 
----
-
-## 🎯 Στόχοι
-
-* Συγκέντρωση διαφορετικών πηγών (`forms`, `emails`, `invoices`) σε ένα ενιαίο feed.
-* Άνθρωπος-στο-βρόχο (**HIL**): επιβεβαίωση, διόρθωση, έγκριση/απόρριψη.
-* Export σε CSV/Excel με headers του template του project.
-
----
-
-## ✨ Βασικά Χαρακτηριστικά
-
-* 📥 **Rebuild feed**: τρέχει parsers και ανανεώνει `outputs/combined_feed.json`.
-* 🔎 **Φίλτρα & αναζήτηση** στο sidebar.
-* 📨 **Emails**: προεπισκόπηση plain & HTML, ανίχνευση invoice number.
-* 🧾 **Τιμολόγια HTML**: προβολή πωλητή/πελάτη/ημερομηνίας/γραμμών.
-* ✏️ **Inline edit** γραμμών με υπολογισμούς (subtotal/ΦΠΑ/σύνολο).
-* ✅ **Approve / Reject** με αλλαγή status.
-* 📝 **Σημειώσεις** ανά εγγραφή.
-* 📤 **Exports (CSV/Excel)** βάσει `dummy_data/templates/data_extraction_template.csv`.
-* 🧰 **Backup & Log viewer**.
+  * Ανεβάστε ένα CSV με **μόνο** την πρώτη γραμμή (ονόματα στηλών).
+  * Η εφαρμογή κάνει έξυπνο ταίριασμα όπου είναι δυνατό.
+  * Αν δεν δώσετε template, χρησιμοποιούνται λογικές προεπιλογές.
+* **Google Sheets**: εμφανίζεται στο UI αλλά συνήθως είναι **ανενεργό** χωρίς ρυθμισμένα διαπιστευτήρια. Αν το χρειάζεστε, μιλήστε με τον διαχειριστή.
 
 ---
 
-## 🛠 Τεχνολογίες
+## 🧱 Τι σημαίνουν οι καταστάσεις (Status)
 
-* **Python** 3.11+
-* **Streamlit** 1.48
-* **pandas**, **openpyxl**
-* **BeautifulSoup4**, **lxml**
-* **altair**, **pydeck**
-
----
-
-## 🖥 Εκκίνηση (Windows)
-
-1. Βεβαιώσου ότι έχεις **Python 3.11+**.
-2. Διπλό κλικ στο **`run.bat`**.
-3. Εκκινεί αυτόματα το UI στο [http://localhost:8501](http://localhost:8501).
+* **Pending**: εκκρεμεί έλεγχος.
+* **Approved**: οριστικά αποδεκτή.
+* **Rejected**: απορρίφθηκε (προτείνεται να γράφετε και **Notes**).
+* **Edited**: έγιναν αλλαγές/διορθώσεις στην εγγραφή.
 
 ---
 
-## 🔄 Ροή Χρήσης
-
-1. **Rebuild feed** από το sidebar → “🔄 Τρέξε parsers & ανανέωσε δεδομένα”.
-2. **Φίλτρα**:
-
-   * Source: form, email, invoice\_html
-   * Status: pending, approved, rejected, edited
-   * Needs action
-3. **Προβολή λεπτομερειών**:
-
-   * Emails: plain/HTML σώμα, ανίχνευση invoice number.
-   * Τιμολόγια: εκδότης/πελάτης, ημερομηνία, γραμμές, υπολογισμοί.
-4. **Status & Notes**:
-
-   * Approve/Reject, προσθήκη σημειώσεων.
-5. **Export**:
-
-   * CSV (UTF-8 BOM) ή Excel, με σειρά/στήλες από το template.
-
----
-
-## 📂 Δομή Φακέλων
+## 📂 Δομή φακέλων (ενδεικτικά)
 
 ```
-automation_project/
+athenagen-hil/
 ├─ app.py
 ├─ run.bat
-├─ requirements.txt / requirements.lock.txt
+├─ requirements.txt
 ├─ dummy_data/
 │  ├─ forms/
 │  ├─ emails/
 │  ├─ invoices/
 │  └─ templates/
 │     └─ data_extraction_template.csv
-├─ outputs/
+├─ outputs/          # εδώ γράφονται τα ενδιάμεσα JSON
 │  ├─ combined_feed.json
-│  ├─ _backups/
-│  └─ log.txt
-├─ exports/
-└─ screenshots/
-   ├─ dashboard.png
-   ├─ sidebar.png
-   ├─ sidebar_2.png
-   ├─ sidebar_3.png
-   ├─ sidebar_4.png
-   ├─ sidebar_5.png
-   ├─ invoice.png
-   ├─ invoice_2.png
-   ├─ invoice_3.png
-   ├─ email.png
-   ├─ status.png
-   └─ log.png
+│  └─ _backups/
+├─ exports/          # προαιρετικά αποθηκεύονται και τα εξαγόμενα αρχεία
+└─ screenshots/      # εικόνες για το README
 ```
 
 ---
 
-## 📷 Screenshots
+## 📷 Εικόνες (Screenshots)
 
-### Dashboard – Κεντρική οθόνη
+> Οι εικόνες υπάρχουν στον φάκελο `screenshots/`. Αν δεν εμφανίζονται στο README, βεβαιωθείτε ότι ο φάκελος είναι μέσα στο repo.
+
+### Κεντρική Οθόνη (Dashboard)
 
 ![Dashboard](screenshots/dashboard.png)
 
@@ -133,7 +151,7 @@ automation_project/
 
 ![Filters Sidebar](screenshots/sidebar.png)
 
-### Rebuild Feed
+### Αναδόμηση Δεδομένων (Rebuild Feed)
 
 ![Rebuild Feed](screenshots/sidebar_4.png)
 
@@ -141,7 +159,7 @@ automation_project/
 
 ![Record Selection](screenshots/sidebar_5.png)
 
-### Περιεχόμενο Email (Plain Text)
+### Περιεχόμενο Email (Plain)
 
 ![Email Preview](screenshots/email.png)
 
@@ -153,11 +171,11 @@ automation_project/
 
 ![Invoice HTML Preview](screenshots/invoice_2.png)
 
-### Στοιχεία Τιμολογίου & Inline Υπολογισμοί
+### Στοιχεία Τιμολογίου & Υπολογισμοί
 
 ![Invoice Details & Calculations](screenshots/invoice_3.png)
 
-### Mapping Template
+### Mapping Template (Στήλες Εξόδου)
 
 ![Mapping Template](screenshots/sidebar_3.png)
 
@@ -175,19 +193,44 @@ automation_project/
 
 ---
 
-## 🛠 Troubleshooting
+## ❓ Συχνές απορίες
 
-* **Κενά στο export**: Έλεγξε template CSV και headers.
-* **Δεν φορτώνει data**: Πάτησε Rebuild feed.
-* **Σπασμένα ελληνικά**: Χρησιμοποίησε UTF-8 BOM (utf-8-sig).
+**Δεν βλέπω εγγραφές**
+→ Πατήστε **Rebuild feed**. Αν συνεχίζει, ίσως λείπουν τα πηγαία αρχεία (μιλήστε με τον υπεύθυνο).
+
+**Τα ελληνικά φαίνονται “σπασμένα” στο Excel**
+→ Χρησιμοποιήστε το CSV που κατεβαίνει με **UTF-8-SIG** (είναι η προεπιλογή).
+
+**Αλλάζω γραμμές τιμολογίου. Πώς αποθηκεύονται;**
+→ Πατήστε **Save items & totals**. Οι υπολογισμοί γίνονται αυτόματα.
+
+**Θέλω εξαγωγή με συγκεκριμένες στήλες**
+→ Ανεβάστε ένα **template CSV** με μόνο την πρώτη γραμμή: τα ονόματα των στηλών.
 
 ---
 
-## 📌 Roadmap
+## 🧰 Troubleshooting
 
-* Google Sheets export.
-* Αυτόματη αποθήκευση exports.
-* PDF invoice parser.
-* Data validation πριν το export.
+* **Η εφαρμογή δεν ξεκινά**: ελέγξτε ότι έχετε **Python 3.11+** και ότι ολοκληρώθηκε επιτυχώς το `pip install -r requirements.txt`.
+* **Άδειος πίνακας/λίστα**: δοκιμάστε **Rebuild feed**.
+* **Πρόβλημα κατά το export**: βεβαιωθείτε πως το template CSV (αν δώσατε) έχει **μόνο** κεφαλίδα (μία γραμμή).
+* **Σφάλμα σε τιμολόγιο**: αφήστε **Note** με την περιγραφή και επισημάνετε την εγγραφή ως **Rejected** ή **Edited**.
 
 ---
+
+## 🔐 Απόρρητο & Ασφάλεια
+
+* Τα δεδομένα παραμένουν **τοπικά** στο μηχάνημα που τρέχει την εφαρμογή.
+* Τα αρχεία παράγονται στους φακέλους **`outputs/`** και **`exports/`**.
+* Δεν αποστέλλονται δεδομένα σε εξωτερικές υπηρεσίες εκτός αν το ρυθμίσει ο διαχειριστής (π.χ. Google Sheets).
+
+---
+
+## 🆘 Βοήθεια
+
+Αν κάτι δεν λειτουργεί όπως αναμένεται, ενημερώστε τον υπεύθυνο/διαχειριστή και αναφέρετε:
+
+* τι κάνατε βήμα-βήμα,
+* ποιο μήνυμα/σφάλμα εμφανίστηκε.
+
+Καλή δουλειά! 🚀
