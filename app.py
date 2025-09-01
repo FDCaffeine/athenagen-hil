@@ -815,6 +815,128 @@ def _parse_sheet_id(sheet_url_or_id: str) -> str:
     return s
 
 
+def _has_gcp_creds() -> tuple[bool, str]:
+    """
+    Ελέγχει αν υπάρχουν διαπιστευτήρια:
+    - μέσω env GOOGLE_APPLICATION_CREDENTIALS (path)
+    - ή τοπικό αρχείο gcp-sa.json
+    Επιστρέφει (υπάρχει_creds, path_που_θα_χρησιμοποιηθεί)
+    """
+    env_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if env_path and Path(env_path).exists():
+        return True, env_path
+    local = "gcp-sa.json"
+    return (Path(local).exists(), local)
+
+
+def upload_dataframe_to_sheet(
+    df: pd.DataFrame,
+    sheet_url_or_id: str,
+    worksheet_name: str = "Sheet1",
+    mode: str = "REPLACE",
+    creds_path: str | None = None,
+) -> str:
+    """
+    Ανεβάζει ένα DataFrame σε Google Sheet.
+    mode: "REPLACE"/"Αντικατάσταση" (clear+write) ή "APPEND"/"Προσθήκη" (append rows).
+    Επιστρέφει το URL του Google Sheet.
+    """
+    # Lazy imports
+    try:
+        import gspread
+        from gspread.exceptions import APIError, WorksheetNotFound
+        from gspread_dataframe import set_with_dataframe
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(f"gspread not available: {e}")
+
+    sheet_id = _parse_sheet_id(sheet_url_or_id)
+    if not sheet_id:
+        raise ValueError("Μη έγκυρο Google Sheet URL/ID.")
+
+    # Βρες διαπιστευτήρια
+    if creds_path is None:
+        creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or "gcp-sa.json"
+    if not Path(creds_path).exists():
+        raise FileNotFoundError(f"Δεν βρέθηκε Service Account JSON στο: {creds_path}")
+
+    # Προαιρετικά βρες το service account email (για βοηθητικά μηνύματα)
+    sa_email = None
+    try:
+        with open(creds_path, encoding="utf-8") as _f:
+            sa_email = (json.load(_f) or {}).get("client_email")
+    except Exception:
+        pass
+
+    # Client
+    gc = gspread.service_account(filename=creds_path)
+
+    # Άνοιγμα spreadsheet
+    try:
+        sh = gc.open_by_key(sheet_id)
+    except Exception as e:
+        # APIError 404 -> λάθος id ή no access
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status == 404:
+            hint = (
+                f"Κάνε share στο service account ({sa_email})."
+                if sa_email
+                else "Έλεγξε τα δικαιώματα."
+            )
+            raise RuntimeError("Το spreadsheet δεν βρέθηκε ή δεν έχεις πρόσβαση. " + hint)
+        raise
+
+    # Πάρε/φτιάξε worksheet
+    try:
+        try:
+            ws = sh.worksheet(worksheet_name)
+        except WorksheetNotFound:
+            ws = sh.add_worksheet(
+                title=worksheet_name,
+                rows=max(len(df) + 10, 100),
+                cols=max(len(df.columns) + 10, 26),
+            )
+
+        # Καθορισμός mode (δέχεται και EL/EN)
+        m = (mode or "").strip().lower()
+        is_replace = m.startswith(("replace", "αντικατάσταση"))
+
+        if is_replace:
+            ws.clear()
+            set_with_dataframe(ws, df, include_index=False, include_column_header=True, resize=True)
+        else:
+            existing = ws.get_all_values()
+            if not existing:
+                # Άδειο φύλλο -> γράψε και headers
+                set_with_dataframe(
+                    ws, df, include_index=False, include_column_header=True, resize=True
+                )
+            else:
+                start_row = len(existing) + 1
+                set_with_dataframe(
+                    ws,
+                    df,
+                    include_index=False,
+                    include_column_header=False,
+                    row=start_row,
+                    col=1,
+                    resize=True,
+                )
+
+        return sh.url
+    except APIError as e:
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status == 404:
+            hint = (
+                f"Κάνε share στο service account ({sa_email})."
+                if sa_email
+                else "Έλεγξε τα δικαιώματα."
+            )
+            raise RuntimeError(
+                "Το worksheet/spreadsheet δεν βρέθηκε ή δεν είναι προσβάσιμο. " + hint
+            )
+        raise
+
+
 def _detect_creds_from_sources(pasted_json: str | None) -> tuple[dict | None, str | None]:
     try:
         if "gcp_service_account" in st.secrets:
@@ -845,52 +967,6 @@ def _detect_creds_from_sources(pasted_json: str | None) -> tuple[dict | None, st
         except Exception:
             return None, None
     return None, None
-
-
-def _build_client(creds_dict: dict):
-    try:
-        import gspread  # lazy import
-        from google.oauth2.service_account import Credentials
-    except Exception as e:
-        raise RuntimeError(
-            "Λείπουν οι βιβλιοθήκες gspread / google-auth. Τρέξε: pip install gspread google-auth"
-        ) from e
-
-    creds = Credentials.from_service_account_info(creds_dict, scopes=GSPREAD_SCOPES)
-    gc = gspread.authorize(creds)
-    # Επιστρέφουμε και το WorksheetNotFound για χρήση στο except χωρίς global import
-    return gc, gspread.WorksheetNotFound
-
-
-def upload_dataframe_to_sheet(
-    df: pd.DataFrame,
-    sheet_id: str,
-    worksheet_name: str,
-    creds_dict: dict,
-    mode: str = "replace",
-):
-    gc, WorksheetNotFound = _build_client(creds_dict)
-    sh = gc.open_by_key(sheet_id)
-    try:
-        ws = sh.worksheet(worksheet_name)
-    except WorksheetNotFound:
-        ws = sh.add_worksheet(
-            title=worksheet_name,
-            rows=max(len(df) + 10, 1000),
-            cols=max(len(df.columns) + 5, 26),
-        )
-    values = [list(df.columns)] + df.astype(object).where(pd.notnull(df), "").values.tolist()
-    if mode == "replace":
-        ws.clear()
-        ws.update(range_name="A1", values=values, value_input_option="RAW")
-    else:
-        existing_records = ws.get_all_values()
-        start_row = len(existing_records) + 1
-        if start_row == 1:
-            ws.update(range_name="A1", values=values, value_input_option="RAW")
-        else:
-            ws.update(range_name=f"A{start_row}", values=values[1:], value_input_option="RAW")
-    return f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit#gid={ws.id}"
 
 
 def run_app() -> None:
@@ -1185,19 +1261,13 @@ def run_app() -> None:
         fname_prefix = st.text_input(t("FILENAME_PREFIX"), value="export")
 
         # Google Sheets specific inputs (only shown if selected)
-        sheet_id_input = ""
         worksheet_input = "Sheet1"
         mode_input = t("REPLACE")
-        creds_paste = ""
         if dest_choice == t("DEST_GSHEETS"):
             st.markdown(t("TARGET_SHEET_CAPTION"))
             sheet_url_or_id = st.text_input(t("TARGET_SHEET"), value="")
             worksheet_input = st.text_input(t("WORKSHEET"), value="Sheet1")
             mode_input = st.selectbox(t("UPLOAD_MODE"), [t("REPLACE"), t("APPEND")], index=0)
-            creds_paste = st.text_area(
-                "Service Account JSON (optional if set in env/secrets)", height=140, value=""
-            )
-            sheet_id_input = _parse_sheet_id(sheet_url_or_id) if sheet_url_or_id else ""
 
         # --- Export run ---
         run_it = st.button(t("RUN_EXPORT"), key="run_export_btn")
@@ -1241,8 +1311,7 @@ def run_app() -> None:
 
                 elif dest_choice == t("DEST_XLSX"):
                     bio = BytesIO()
-                    # openpyxl/xlsxwriter χρησιμοποιείται από pandas writer ανάλογα με το env
-                    with pd.ExcelWriter(bio, engine="xlsxwriter") as writer:
+                    with pd.ExcelWriter(bio, engine="openpyxl") as writer:
                         df_export.to_excel(writer, index=False, sheet_name="Data")
                     bio.seek(0)
                     xlsx_bytes = bio.getvalue()
@@ -1270,39 +1339,26 @@ def run_app() -> None:
                         )
 
                 else:  # Google Sheets
-                    # Βασικοί έλεγχοι εισόδου
-                    if not sheet_id_input:
-                        st.error(t("TARGET_SHEET") + ": required")
-                        st.stop()
-
-                    # Credentials από secrets/env/paste
-                    creds_dict, _sa_email = _detect_creds_from_sources(creds_paste)
-                    if not creds_dict:
+                    has_creds, creds_path = _has_gcp_creds()
+                    if not has_creds:
                         st.warning(t("NEED_CREDS"))
-                        st.stop()
-
-                    mode_norm = "replace" if mode_input == t("REPLACE") else "append"
-
-                    try:
-                        url = upload_dataframe_to_sheet(
-                            df_export,
-                            sheet_id=sheet_id_input,
-                            worksheet_name=worksheet_input or "Sheet1",
-                            creds_dict=creds_dict,  # dict[str, Any]
-                            mode=mode_norm,
-                        )
-                        st.success(
-                            t("EXPORT_READY_GS").format(
-                                ws=worksheet_input or "Sheet1", mode=mode_norm
+                    else:
+                        try:
+                            url = upload_dataframe_to_sheet(
+                                df_export,
+                                sheet_url_or_id,
+                                worksheet_name=worksheet_input or "Sheet1",
+                                mode=mode_input or t("REPLACE"),
+                                creds_path=creds_path,
                             )
-                        )
-                        st.link_button(t("OPEN_IN_GSHEETS"), url)
-                    except Exception as ex:
-                        ui_error(
-                            "Google Sheets upload failed",
-                            "gsheets_upload_error",
-                            {"error": str(ex)},
-                        )
+                            st.success(f"Ανέβηκαν {len(df_export)} γραμμές στο Google Sheets.")
+                            st.link_button("Άνοιγμα στο Google Sheets", url)
+                        except Exception as exc:
+                            ui_error(
+                                "Απέτυχε το ανέβασμα στο Google Sheets.",
+                                "gsheets_upload_error",
+                                {"error": str(exc)},
+                            )
 
             except Exception as exc:
                 ui_error("Απέτυχε το export.", "export_error", {"error": str(exc)})
@@ -1649,8 +1705,6 @@ def run_app() -> None:
                     "invoice_metrics_error",
                     {"error": str(e)},
                 )
-
-            # (continues in Part 5: items editor, summary, meta editor, preview HTML, raw JSON)
 
             # -------- Items editor --------
             with st.expander(t("ITEM_LINES"), expanded=False):
